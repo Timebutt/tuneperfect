@@ -21,6 +21,7 @@
     "store:allow-keys",
     "store:allow-clear",
     "log:default",
-    "os:allow-platform"
+    "os:allow-platform",
+    "midi:default"
   ]
 }

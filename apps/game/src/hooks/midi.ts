@@ -22,7 +22,7 @@ export async function registerMidiInputs() {
 }
 
 export function sendMidiNote(channel: number, note: number, value?: number) {
-  const loopbackMidiDevice = _midiOutputDevices.find((device) => device.name === "loopMIDI Port");
+  const loopbackMidiDevice = _midiOutputDevices.find((device) => device.name === "loopMIDI Port" || device.name === "Virtual MIDI Bus 1");
   if (!loopbackMidiDevice) {
     return;
   }
