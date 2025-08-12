@@ -49,9 +49,6 @@ export function createMidiNoteListener(
 
     // Define the event handler function
     const handleMidiMessage: (this: MIDIInput, ev: MIDIMessageEvent) => void = (event) => {
-      console.log("midi event!");
-      console.log(event);
-
       const statusByte = 0x90 | (channel - 1);
       if (event.data && event.data[0] === statusByte) {
         if (!noteNumber || event.data[1] === noteNumber) {
@@ -64,14 +61,14 @@ export function createMidiNoteListener(
     _midiInputDevices.forEach((input) => {
       input.addEventListener("midimessage", handleMidiMessage);
       activeListeners.set(input, handleMidiMessage);
-      console.log(`Listening for note ${noteNumber} on MIDI input: ${input.name}`);
+      // console.log(`Listening for note ${noteNumber} on MIDI input: ${input.name}`);
     });
 
     // Cleanup function: remove event listeners when the effect re-runs or component unmounts
     onCleanup(() => {
       activeListeners.forEach((handler, input) => {
         input.removeEventListener("midimessage", handler);
-        console.log(`Stopped listening for note ${noteNumber} on MIDI input: ${input.name}`);
+        // console.log(`Stopped listening for note ${noteNumber} on MIDI input: ${input.name}`);
       });
       activeListeners.clear();
     });

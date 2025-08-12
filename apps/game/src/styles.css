@@ -3,8 +3,13 @@
 @import "@fontsource/lato/400.css";
 @import "@fontsource/lato/700.css";
 
+@font-face {
+    font-family: Pukkelpop;
+    src: url('/Pukkelpop.ttf') format('truetype');
+}
+
 @theme {
-  --font-primary: "Lato", "sans-serif";
+  --font-primary: "Pukkelpop", "Lato", "sans-serif";
 
   --spacing: 0.25cqw;
 
@@ -38,6 +43,8 @@
   --animate-swipe-out: swipeOut 0.1s ease-in;
   --animate-scroll: scroll 10s linear infinite;
   --animate-sparkle: sparkle 2s ease-in-out infinite;
+
+  --font-weight-bold: normal;
 
   @keyframes hide {
     from {
@@ -228,6 +235,13 @@ html,
 body {
   overflow: hidden;
 }
+
+html,
+body, button {
+  text-transform: uppercase;
+}
+
+
 
 .gradient-bg-primary {
   background: radial-gradient(at 60% top, rgba(30, 36, 75, 1) 0%, rgba(16, 16, 36, 1) 100%);
