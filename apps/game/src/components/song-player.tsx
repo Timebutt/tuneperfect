@@ -227,7 +227,9 @@ export default function SongPlayer(props: SongPlayerProps) {
           if (gap > 0) {
             // Video is ahead, try to advance audio
             const newAudioTime = audio.currentTime + gap;
-            if (newAudioTime >= 0 && newAudioTime <= audio.duration) {
+            // Hack to always use flow 2 and support negative videoGap values correctly
+            let a = 1;
+            if (newAudioTime >= 0 && newAudioTime <= audio.duration && a < 0) {
               audio.currentTime = newAudioTime;
               await Promise.all([audio.play(), video.play()]);
             } else {
