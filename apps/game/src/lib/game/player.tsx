@@ -104,7 +104,10 @@ export function createPlayer(options: Accessor<CreatePlayerOptions>) {
     return beatMap;
   });
 
-  const processedBeats = new ReactiveMap<number, { note: Note; midiNote: number; isFirstInPhrase: boolean; isFirstInNote: boolean }>();
+  const processedBeats = new ReactiveMap<
+    number,
+    { note: Note; midiNote: number; isFirstInPhrase: boolean; isFirstInNote: boolean }
+  >();
 
   const delayedFlooredBeat = createMemo(() => {
     return Math.floor(delayedBeat());
@@ -193,7 +196,9 @@ export function createPlayer(options: Accessor<CreatePlayerOptions>) {
     score,
   };
 
-  const Provider = (props: { children: JSX.Element }) => <PlayerProvider value={values}>{props.children}</PlayerProvider>;
+  const Provider = (props: { children: JSX.Element }) => (
+    <PlayerProvider value={values}>{props.children}</PlayerProvider>
+  );
 
   return {
     ...values,

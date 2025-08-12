@@ -52,7 +52,7 @@ function RootComponent() {
     createMidiNoteListener(5, undefined, (event) => {
       if (event.data) {
         const songMidiNote = event.data[1];
-        if(!songMidiNote) {
+        if (typeof songMidiNote !== "number") {
           return;
         }
 
@@ -60,8 +60,7 @@ function RootComponent() {
         if (matchingSong) {
           navigate({ to: `/sing/${matchingSong.hash}` });
         } else {
-          
-          navigate({ to: '/sing' });
+          navigate({ to: "/sing" });
         }
       }
     });

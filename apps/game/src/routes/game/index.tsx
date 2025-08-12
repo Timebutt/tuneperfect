@@ -34,7 +34,10 @@ function GameComponent() {
     pause();
   });
 
-  sendMidiNote(1, 2);
+  // Delayed by a little bit to ensure there's no glitch in OBS
+  setTimeout(() => {
+    sendMidiNote(1, 2);
+  }, 300);
 
   useNavigation(() => ({
     layer: 0,
@@ -69,8 +72,8 @@ function GameComponent() {
     stop();
   });
 
-  const handleEnded = () => {
-    roundActions.endRound(scores());
+  const handleEnded = (submitScores: boolean) => {
+    roundActions.endRound(scores(), submitScores);
   };
 
   const gradient = () => {
@@ -109,7 +112,7 @@ function GameComponent() {
                     playing={playing()}
                     class="h-full w-full"
                     song={settings().song}
-                    onEnded={handleEnded}
+                    onEnded={() => handleEnded(true)}
                     onError={handleError}
                   />
                 )}
@@ -132,7 +135,7 @@ function GameComponent() {
             <PauseMenu
               class="absolute inset-0"
               onClose={resume}
-              onExit={handleEnded}
+              onExit={() => handleEnded(false)}
               onRestart={handleRestart}
               gradient={gradient()}
             />
@@ -151,12 +154,8 @@ function GameComponent() {
             />
             <div class="relative flex h-full w-full flex-col items-center justify-center gap-2">
               <p class="text-6xl">{roundStore.settings()?.song.artist}</p>
-              <div class="max-w-200">
-                <span
-                  class="text-center font-bold text-8xl"
-                >
-                  {roundStore.settings()?.song.title}
-                </span>
+              <div class="px-8 text-center">
+                <span class="text-center font-bold text-8xl">{roundStore.settings()?.song.title}</span>
               </div>
             </div>
           </div>

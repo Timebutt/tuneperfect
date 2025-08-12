@@ -10,10 +10,10 @@ export async function initWebSocket() {
         return;
       }
 
-      webSocket.onmessage = (message) => {
-        console.log("webSocket message");
-        console.log(message);
-      };
+      // webSocket.onmessage = (message) => {
+      //   console.log("webSocket message");
+      //   console.log(message);
+      // };
 
       resolve();
     };

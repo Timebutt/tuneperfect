@@ -44,7 +44,7 @@ export default function Lyrics() {
       }}
     >
       <div class="grid grid-cols-[1fr_max-content_1fr]">
-        <div class="pt-3 pr-1 pb-2 flex items-center">
+        <div class="flex items-center pt-3 pr-1 pb-2">
           <Show when={leadInPercentage()}>
             {(percentage) => (
               <div
@@ -104,12 +104,13 @@ function LyricsNote(props: LyricsNoteProps) {
     return clamp(((beat - props.note.startBeat) * 100) / props.note.length, 0, 100);
   });
 
+  // Lyrics font size are here!
   return (
     <span
       style={{
         "background-image": `linear-gradient(to right, ${props.micColor} ${percentage()}%, white ${percentage()}%)`,
       }}
-      class="inline-block whitespace-pre bg-clip-text text-[80px] text-transparent leading-relaxed"
+      class="inline-block whitespace-pre bg-clip-text text-[62px] text-transparent leading-relaxed"
       classList={{
         "m-[-0.15cqw] p-[0.15cqw] italic": props.note.type === "Freestyle",
       }}

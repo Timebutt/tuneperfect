@@ -47,26 +47,30 @@ export function useRoundActions() {
     navigate({ to: "/game" });
   };
 
-  const endRound = (scores: Score[]) => {
-    roundStore.setScores(scores);
+  const endRound = (scores: Score[], submitScores: boolean) => {
+    if (submitScores) {
+      roundStore.setScores(scores);
 
-    sendWebsocketMessage(
-      JSON.stringify({
-        type: "scores",
-        value: scores.map((absoluteScore, index) => {
-          const voice = roundStore.settings()?.song?.voices[index];
-          if (!voice) {
-            return 0;
-          }
+      sendWebsocketMessage(
+        JSON.stringify({
+          type: "scores",
+          value: scores.map((absoluteScore, index) => {
+            const voice = roundStore.settings()?.song?.voices[index];
+            if (!voice) {
+              return 0;
+            }
 
-          const maxScore = getMaxScore(voice);
-          const relativeScore = getRelativeScore(absoluteScore, maxScore);
-          return Math.floor(relativeScore.normal + relativeScore.golden + relativeScore.bonus);
+            const maxScore = getMaxScore(voice);
+            const relativeScore = getRelativeScore(absoluteScore, maxScore);
+            return Math.floor(relativeScore.normal + relativeScore.golden + relativeScore.bonus);
+          }),
         }),
-      }),
-    );
+      );
 
-    navigate({ to: "/game/score" });
+      navigate({ to: "/game/score" });
+    } else {
+      navigate({ to: "/sing" });
+    }
   };
 
   const returnRound = () => {

@@ -22,7 +22,9 @@ export async function registerMidiInputs() {
 }
 
 export function sendMidiNote(channel: number, note: number, value?: number) {
-  const loopbackMidiDevice = _midiOutputDevices.find((device) => device.name === "loopMIDI Port" || device.name === "Virtual MIDI Bus 1");
+  const loopbackMidiDevice = _midiOutputDevices.find(
+    (device) => device.name === "loopMIDI Port" || device.name === "Virtual MIDI Bus 1",
+  );
   if (!loopbackMidiDevice) {
     return;
   }
@@ -58,6 +60,7 @@ export function createMidiNoteListener(
     };
 
     // Add listeners to all available MIDI input devices
+    // TO-DO: listen only to certain MIDI devices
     _midiInputDevices.forEach((input) => {
       input.addEventListener("midimessage", handleMidiMessage);
       activeListeners.set(input, handleMidiMessage);
