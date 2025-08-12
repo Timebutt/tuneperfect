@@ -44,7 +44,7 @@ export default function Lyrics() {
       }}
     >
       <div class="grid grid-cols-[1fr_max-content_1fr]">
-        <div class="pt-3 pr-1 pb-2">
+        <div class="pt-3 pr-1 pb-2 flex items-center">
           <Show when={leadInPercentage()}>
             {(percentage) => (
               <div
@@ -78,7 +78,7 @@ export default function Lyrics() {
                 italic: note.type === "Freestyle",
               }}
             >
-              {note.text}
+              {note.text.replaceAll('~', '')}
             </span>
           )}
         </For>
@@ -114,7 +114,7 @@ function LyricsNote(props: LyricsNoteProps) {
         "m-[-0.15cqw] p-[0.15cqw] italic": props.note.type === "Freestyle",
       }}
     >
-      {props.note.text}
+      {props.note.text.replaceAll('~', '')}
     </span>
   );
 }
