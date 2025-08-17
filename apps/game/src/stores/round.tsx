@@ -51,11 +51,16 @@ export function useRoundActions() {
     if (submitScores) {
       roundStore.setScores(scores);
 
+      const voicesCount = roundStore.settings()?.song?.voices.length;
+      if (!voicesCount) {
+        return;
+      }
+
       sendWebsocketMessage(
         JSON.stringify({
           type: "scores",
           value: scores.map((absoluteScore, index) => {
-            const voice = roundStore.settings()?.song?.voices[index];
+            const voice = roundStore.settings()?.song?.voices[index + 1 > voicesCount ? 0 : index];
             if (!voice) {
               return 0;
             }

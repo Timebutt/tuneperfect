@@ -20,7 +20,7 @@ export default function Score(props: ScoreProps) {
 
     if (maxScoreTotal === 0) return "0";
 
-    const score = (currentScoreTotal / maxScoreTotal) * 100000;
+    const score = (currentScoreTotal / maxScoreTotal) * 10000;
 
     return score.toLocaleString("en-US", {
       maximumFractionDigits: 0,
