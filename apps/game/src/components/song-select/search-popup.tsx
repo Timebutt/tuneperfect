@@ -1,0 +1,154 @@
+import { createEffect, onCleanup, onMount, Show } from "solid-js";
+import { Motion } from "solid-motionone";
+import IconF6Key from "~icons/sing/f6-key";
+import IconF7Key from "~icons/sing/f7-key";
+import IconGamepadLB from "~icons/sing/gamepad-lb";
+import IconGamepadRB from "~icons/sing/gamepad-rb";
+import IconTriangleLeft from "~icons/sing/triangle-left";
+import IconTriangleRight from "~icons/sing/triangle-right";
+
+import { VirtualKeyboard } from "~/components/ui/virtual-keyboard";
+import { keyMode, useNavigation } from "~/hooks/navigation";
+import type { SearchFieldScope } from "~/hooks/use-song-filter";
+import { t } from "~/lib/i18n";
+
+interface SearchPopupProps {
+  searchQuery: string;
+  searchFieldScope: SearchFieldScope;
+  onSearchQuery: (query: string) => void;
+  onSearchFieldScope: (scope: SearchFieldScope) => void;
+  onClose: () => void;
+}
+
+const SCOPE_OPTIONS: { value: SearchFieldScope; label: () => string }[] = [
+  { value: "all", label: () => t("sing.filter.all") },
+  { value: "artist", label: () => t("sing.sort.artist") },
+  { value: "title", label: () => t("sing.sort.title") },
+  { value: "year", label: () => t("sing.sort.year") },
+  { value: "genre", label: () => t("sing.filter.genre") },
+  { value: "language", label: () => t("sing.filter.language") },
+  { value: "edition", label: () => t("sing.filter.edition") },
+  { value: "creator", label: () => t("sing.filter.creator") },
+];
+
+export function SearchPopup(props: SearchPopupProps) {
+  let searchRef: HTMLInputElement | undefined;
+  let popupRef!: HTMLDivElement;
+
+  createEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (popupRef && !popupRef.contains(event.target as Node)) {
+        props.onClose();
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    onCleanup(() => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    });
+  });
+
+  const onInput = (e: InputEvent & { currentTarget: HTMLInputElement }) => {
+    props.onSearchQuery(e.currentTarget.value);
+  };
+
+  const moveScope = (direction: "left" | "right") => {
+    const currentIndex = SCOPE_OPTIONS.findIndex((option) => option.value === props.searchFieldScope);
+    const newIndex = (currentIndex + (direction === "left" ? -1 : 1) + SCOPE_OPTIONS.length) % SCOPE_OPTIONS.length;
+    const newOption = SCOPE_OPTIONS[newIndex];
+    if (newOption) {
+      props.onSearchFieldScope(newOption.value);
+    }
+  };
+
+  useNavigation({
+    layer: 1,
+    onKeydown(event) {
+      if (event.action === "back" || event.action === "search") {
+        props.onClose();
+      } else if (event.action === "filter-left") {
+        moveScope("left");
+      } else if (event.action === "filter-right") {
+        moveScope("right");
+      }
+    },
+
+    onKeyup(event) {
+      if (event.origin === "keyboard") {
+        if (event.action === "confirm" && event.originalKey !== " ") {
+          props.onClose();
+        }
+      }
+    },
+  });
+
+  onMount(() => {
+    searchRef?.focus();
+  });
+
+  const currentScopeLabel = () =>
+    SCOPE_OPTIONS.find((option) => option.value === props.searchFieldScope)?.label() || t("sing.filter.all");
+
+  return (
+    <div class="absolute top-full left-0 z-20 mt-2" ref={popupRef}>
+      <Motion.div
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -10 }}
+        class="w-96 rounded-lg bg-black/30 p-4 text-white shadow-xl backdrop-blur-md"
+      >
+        <div class="space-y-3">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <Show when={keyMode() === "keyboard"} fallback={<IconGamepadLB class="text-sm" />}>
+                <IconF6Key class="text-sm" />
+              </Show>
+              <button
+                type="button"
+                class="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md bg-white/10 transition-transform hover:opacity-75 active:scale-95"
+                onClick={() => moveScope("left")}
+              >
+                <IconTriangleLeft class="text-xs" />
+              </button>
+            </div>
+
+            <div class="flex justify-center">
+              <div class="rounded-md bg-white/10 px-3 py-1">
+                <span class="text-sm font-medium text-white">{currentScopeLabel()}</span>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                class="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md bg-white/10 transition-transform hover:opacity-75 active:scale-95"
+                onClick={() => moveScope("right")}
+              >
+                <IconTriangleRight class="text-xs" />
+              </button>
+              <Show when={keyMode() === "keyboard"} fallback={<IconGamepadRB class="text-sm" />}>
+                <IconF7Key class="text-sm" />
+              </Show>
+            </div>
+          </div>
+
+          <input
+            value={props.searchQuery}
+            onInput={onInput}
+            ref={searchRef}
+            type="text"
+            placeholder={t("sing.search")}
+            aria-label={t("sing.search")}
+            class="focus:gradient-sing placeholder-gray-400 w-full rounded-md bg-white/10 px-3 py-2 text-white transition-all focus:bg-linear-to-r focus:outline-none"
+          />
+        </div>
+
+        <Show when={keyMode() === "gamepad"}>
+          <div class="mt-4 flex justify-center">
+            <VirtualKeyboard inputRef={searchRef} layer={1} onClose={props.onClose} />
+          </div>
+        </Show>
+      </Motion.div>
+    </div>
+  );
+}

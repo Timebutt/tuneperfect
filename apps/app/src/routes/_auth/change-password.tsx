@@ -2,6 +2,7 @@ import { safe } from "@orpc/client";
 import { createForm, revalidateLogic } from "@tanstack/solid-form";
 import { createFileRoute, useNavigate } from "@tanstack/solid-router";
 import * as v from "valibot";
+
 import Button from "~/components/ui/button";
 import Card from "~/components/ui/card";
 import Input from "~/components/ui/input";
@@ -18,17 +19,26 @@ function ChangePasswordComponent() {
 
   const form = createForm(() => ({
     defaultValues: {
+      currentPassword: "",
       newPassword: "",
       confirmPassword: "",
     },
     onSubmit: async ({ value }) => {
-      const [error, _data, _isDefined] = await safe(
+      const [error, _data, isDefined] = await safe(
         client.user.updateMe.call({
           password: value.newPassword,
+          currentPassword: value.currentPassword,
         }),
       );
 
       if (error) {
+        if (isDefined && error.code === "INVALID_CURRENT_PASSWORD") {
+          notify({
+            message: t("changePassword.invalidCurrentPassword"),
+            intent: "error",
+          });
+          return;
+        }
         notify({
           message: t("error.unknown"),
           intent: "error",
@@ -46,6 +56,7 @@ function ChangePasswordComponent() {
     validators: {
       onDynamic: v.pipe(
         v.object({
+          currentPassword: v.pipe(v.string(), v.minLength(1, t("changePassword.currentPasswordRequired"))),
           newPassword: v.pipe(v.string(), v.minLength(8, t("changePassword.passwordMinLength"))),
           confirmPassword: v.pipe(v.string()),
         }),
@@ -62,9 +73,9 @@ function ChangePasswordComponent() {
   }));
 
   return (
-    <div class="flex flex-grow flex-col items-center justify-center p-2">
+    <div class="flex grow flex-col items-center justify-center p-2">
       <Card class="flex w-100 max-w-full flex-col gap-4">
-        <h1 class="font-semibold text-xl">{t("changePassword.title")}</h1>
+        <h1 class="text-xl font-semibold">{t("changePassword.title")}</h1>
         <form
           class="flex flex-col gap-4"
           onSubmit={(e) => {
@@ -73,6 +84,19 @@ function ChangePasswordComponent() {
             form.handleSubmit();
           }}
         >
+          <form.Field name="currentPassword">
+            {(field) => (
+              <Input
+                label={t("changePassword.currentPassword")}
+                name={field().name}
+                type="password"
+                value={field().state.value}
+                onBlur={field().handleBlur}
+                onInput={(e) => field().handleChange(e.currentTarget.value)}
+                errorMessage={field().state.meta.errors?.[0]?.message}
+              />
+            )}
+          </form.Field>
           <form.Field name="newPassword">
             {(field) => (
               <Input

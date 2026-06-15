@@ -1,9 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { createRouter, RouterProvider } from "@tanstack/solid-router";
 import { render } from "solid-js/web";
-import { routeTree } from "./routeTree.gen";
-import "./styles.css";
+
 import { DialogProvider } from "./lib/dialog.tsx";
+import { initPostHog } from "./lib/posthog";
+
+import "./styles.css";
+import { routeTree } from "./routeTree.gen";
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -29,6 +32,9 @@ declare module "@tanstack/solid-router" {
     router: typeof router;
   }
 }
+
+const posthogToken = import.meta.env.VITE_POSTHOG_TOKEN;
+if (posthogToken) initPostHog(posthogToken);
 
 const rootElement = document.getElementById("app");
 if (rootElement) {

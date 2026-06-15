@@ -1,3 +1,5 @@
+use chardetng::{EncodingDetector, Iso2022JpDetection, Utf8Detection};
+use semver::Version;
 use std::fs;
 use unicode_normalization::UnicodeNormalization;
 
@@ -40,6 +42,49 @@ fn parse_us_bool(value: &str) -> bool {
     matches!(value.to_lowercase().as_str(), "yes" | "true" | "1")
 }
 
+fn parse_version(value: &str) -> Result<String, AppError> {
+    let version_str = value.trim().trim_start_matches('v').trim_start_matches('V');
+    // Validate it's a valid semver version
+    Version::parse(version_str)
+        .map_err(|_| AppError::UltrastarError(format!("Invalid version format: {}", value)))?;
+    Ok(version_str.to_string())
+}
+
+fn parse_comma_separated_values(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn parse_multi_value_field(value: &str, supports_multi_value: bool) -> Option<Vec<String>> {
+    if value.is_empty() {
+        return None;
+    }
+
+    if supports_multi_value {
+        let values = parse_comma_separated_values(value);
+        if values.is_empty() {
+            None
+        } else {
+            Some(values)
+        }
+    } else {
+        Some(vec![value.to_string()])
+    }
+}
+
+fn parse_time_value(value: &str, property: &str, uses_milliseconds: bool) -> Result<f64, AppError> {
+    let parsed = parse_us_float(value, property)?;
+    // Convert seconds to milliseconds for versions < 2.0.0
+    Ok(if uses_milliseconds {
+        parsed
+    } else {
+        parsed * 1000.0
+    })
+}
+
 pub fn parse_ultrastar_txt(content: &str) -> Result<Song, AppError> {
     let content = content.strip_prefix('\u{FEFF}').unwrap_or(content);
 
@@ -60,12 +105,19 @@ pub fn parse_ultrastar_txt(content: &str) -> Result<Song, AppError> {
         creator: None,
         relative: Some(false),
         audio: None,
+        instrumental: None,
         cover: None,
         video: None,
         background: None,
         p1: None,
         p2: None,
         preview_start: None,
+        version: None,
+        tags: None,
+        medley_start_beat: None,
+        medley_end_beat: None,
+        medley_start: None,
+        medley_end: None,
         voices: Vec::new(),
         midi_note: None,
     };
@@ -76,6 +128,30 @@ pub fn parse_ultrastar_txt(content: &str) -> Result<Song, AppError> {
     let mut md5_context = md5::Context::new();
 
     let lines: Vec<&str> = content.lines().collect();
+
+    // First pass: find version to determine parsing behavior
+    let mut file_version: Option<String> = None;
+    for line in lines.iter() {
+        let line = line.trim_start();
+        if line.starts_with('#') {
+            let line = line.trim();
+            if let Some((property, value)) = line[1..].split_once(':') {
+                let property = property.trim().to_lowercase();
+                if property == "version" {
+                    file_version = Some(parse_version(value.trim())?);
+                    break;
+                }
+            }
+        }
+    }
+
+    // Default to 1.0.0 if no version specified
+    let version_str = file_version.as_deref().unwrap_or("1.0.0");
+    song.version = Some(version_str.to_string());
+    let version = Version::parse(version_str)
+        .map_err(|_| AppError::UltrastarError(format!("Invalid version: {}", version_str)))?;
+    let supports_multi_value = version >= Version::parse("1.1.0").unwrap();
+    let uses_milliseconds = version >= Version::parse("2.0.0").unwrap();
 
     for (_index, line) in lines.iter().enumerate() {
         let line = line.trim_start();
@@ -92,34 +168,76 @@ pub fn parse_ultrastar_txt(content: &str) -> Result<Song, AppError> {
                 match property.as_str() {
                     "title" => song.title = value.to_string(),
                     "artist" => song.artist = value.to_string(),
-                    "language" => song.language = Some(value.to_string()),
-                    "edition" => song.edition = Some(value.to_string()),
-                    "genre" => song.genre = Some(value.to_string()),
+                    "language" => {
+                        song.language = parse_multi_value_field(value, supports_multi_value)
+                    }
+                    "edition" => {
+                        song.edition = parse_multi_value_field(value, supports_multi_value)
+                    }
+                    "genre" => song.genre = parse_multi_value_field(value, supports_multi_value),
                     "year" => {
-                        if value.is_empty() {
-                            song.year = None;
+                        song.year = if value.is_empty() {
+                            None
                         } else {
-                            song.year = Some(parse_us_int(value, &property)?);
+                            Some(parse_us_int(value, &property)?)
                         }
                     }
                     "bpm" => song.bpm = parse_us_float(value, &property)?,
                     "gap" => song.gap = parse_us_float(value, &property)?,
-                    "start" => song.start = Some(parse_us_float(value, &property)?),
+                    "start" => {
+                        song.start = Some(parse_time_value(value, &property, uses_milliseconds)?)
+                    }
                     "end" => song.end = Some(parse_us_int(value, &property)?),
                     "mp3" | "audio" => song.audio = Some(value.to_string()),
+                    "instrumental" => song.instrumental = Some(value.to_string()),
                     "cover" => song.cover = Some(value.to_string()),
                     "video" => song.video = Some(value.to_string()),
                     "background" => song.background = Some(value.to_string()),
                     "relative" => song.relative = Some(parse_us_bool(value)),
-                    "videogap" => song.video_gap = parse_us_float(value, &property)?,
-                    "author" | "creator" => song.creator = Some(value.to_string()),
+                    "videogap" => {
+                        song.video_gap = parse_time_value(value, &property, uses_milliseconds)?
+                    }
+                    "author" | "creator" => {
+                        song.creator = parse_multi_value_field(value, supports_multi_value)
+                    }
                     "duetsingerp1" | "p1" => song.p1 = Some(value.to_string()),
                     "duetsingerp2" | "p2" => song.p2 = Some(value.to_string()),
                     "preview" | "previewstart" => {
-                        song.preview_start = Some(parse_us_float(value, &property)?)
+                        song.preview_start =
+                            Some(parse_time_value(value, &property, uses_milliseconds)?)
+                    }
+                    "tags" => song.tags = parse_multi_value_field(value, supports_multi_value),
+                    "version" => song.version = Some(parse_version(value)?),
+                    "medleystartbeat" => {
+                        song.medley_start_beat = if value.is_empty() {
+                            None
+                        } else {
+                            Some(parse_us_int(value, &property)?)
+                        }
+                    }
+                    "medleyendbeat" => {
+                        song.medley_end_beat = if value.is_empty() {
+                            None
+                        } else {
+                            Some(parse_us_int(value, &property)?)
+                        }
+                    }
+                    "medleystart" => {
+                        song.medley_start = if value.is_empty() {
+                            None
+                        } else {
+                            Some(parse_time_value(value, &property, uses_milliseconds)?)
+                        }
+                    }
+                    "medleyend" => {
+                        song.medley_end = if value.is_empty() {
+                            None
+                        } else {
+                            Some(parse_time_value(value, &property, uses_milliseconds)?)
+                        }
                     },
                     "midinote" => song.midi_note = Some(parse_us_int(value, &property)?),
-                    _ => {}
+                    _ => (),
                 }
             }
         } else if [":", "*", "F", "R", "G"]
@@ -193,7 +311,7 @@ pub fn parse_ultrastar_txt(content: &str) -> Result<Song, AppError> {
             md5_context.consume(song.title.as_bytes());
             md5_context.consume(song.artist.as_bytes());
 
-            song.hash = format!("{:x}", md5_context.compute());
+            song.hash = format!("{:x}", md5_context.finalize());
             song.voices = voices;
             break;
         }
@@ -225,7 +343,12 @@ pub fn parse_local_txt_file(
     files: &Vec<FileEntry>,
     media_base_url: &str,
 ) -> Result<LocalSong, AppError> {
-    let content = fs::read_to_string(txt)?;
+    let bytes = fs::read(txt)?;
+    let mut detector = EncodingDetector::new(Iso2022JpDetection::Deny);
+    detector.feed(&bytes, true);
+    let encoding = detector.guess(None, Utf8Detection::Allow);
+    let (content, _, _) = encoding.decode(&bytes);
+
     let song = parse_ultrastar_txt(&content)?;
 
     let find_file = |filename: &Option<String>| -> Option<&FileEntry> {
@@ -253,6 +376,7 @@ pub fn parse_local_txt_file(
         };
 
     let audio_file = find_file(&song.audio);
+    let instrumental_file = find_file(&song.instrumental);
     let video_file = find_file(&song.video);
     let cover_file = find_file(&song.cover);
     let background_file = find_file(&song.background);
@@ -264,6 +388,12 @@ pub fn parse_local_txt_file(
         )));
     }
 
+    if song.instrumental.is_some() && instrumental_file.is_none() {
+        log::warn!(
+            "Instrumental file '{}' was specified but not found",
+            song.instrumental.as_ref().unwrap()
+        );
+    }
     if song.video.is_some() && video_file.is_none() {
         log::warn!(
             "Video file '{}' was specified but not found",
@@ -284,6 +414,7 @@ pub fn parse_local_txt_file(
     }
 
     let audio_url = create_url_from_file(audio_file)?;
+    let instrumental_url = create_url_from_file(instrumental_file)?;
     let video_url = create_url_from_file(video_file)?;
     let cover_url = create_url_from_file(cover_file)?;
     let background_url = create_url_from_file(background_file)?;
@@ -296,13 +427,24 @@ pub fn parse_local_txt_file(
 
     let replay_gain = audio_file.and_then(|file| get_replay_gain(&file.path).ok());
 
+    let created_at = fs::metadata(txt).ok().and_then(|metadata| {
+        metadata
+            .created()
+            .or_else(|_| metadata.modified())
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_millis() as f64)
+    });
+
     Ok(LocalSong {
         song,
         audio_url,
+        instrumental_url,
         video_url,
         cover_url,
         background_url,
         replay_gain_track_gain: replay_gain.as_ref().and_then(|rg| rg.track_gain),
         replay_gain_track_peak: replay_gain.as_ref().and_then(|rg| rg.track_peak),
+        created_at,
     })
 }

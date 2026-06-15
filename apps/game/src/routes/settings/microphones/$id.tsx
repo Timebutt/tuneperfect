@@ -1,13 +1,15 @@
 import { createFileRoute, useNavigate } from "@tanstack/solid-router";
 import { createResource, createSignal, Show, Suspense } from "solid-js";
+import IconLoaderCircle from "~icons/lucide/loader-circle";
+
 import { commands } from "~/bindings";
-import KeyHints from "~/components/key-hints";
 import Layout from "~/components/layout";
 import Menu, { type MenuItem } from "~/components/menu";
+import MicLevelMeter from "~/components/mic-level-meter";
+import SettingsFooter from "~/components/settings-footer";
 import TitleBar from "~/components/title-bar";
 import { t } from "~/lib/i18n";
 import { type Microphone, settingsStore } from "~/stores/settings";
-import IconLoaderCircle from "~icons/lucide/loader-circle";
 
 export const Route = createFileRoute("/settings/microphones/$id")({
   component: MicrophoneComponent,
@@ -36,8 +38,10 @@ function MicrophoneComponent() {
   return (
     <Layout
       intent="secondary"
-      header={<TitleBar title={t("settings.title")} description={t("settings.sections.microphones.title")} onBack={onBack} />}
-      footer={<KeyHints hints={["back", "navigate", "confirm"]} />}
+      header={
+        <TitleBar title={t("settings.title")} description={t("settings.sections.microphones.title")} onBack={onBack} />
+      }
+      footer={<SettingsFooter />}
     >
       <Suspense
         fallback={
@@ -48,16 +52,27 @@ function MicrophoneComponent() {
       >
         <Show when={microphones()}>
           {(microphones) => {
-            const [microphone, setMicrophone] = createSignal(
-              settingsStore.microphones()[id()] || {
-                name: microphones()[0]?.name || null,
-                channel: 1,
-                color: "sky",
-                delay: 200,
-                gain: 1,
-                threshold: 2,
-              }
-            );
+            const existing = settingsStore.microphones()[id()];
+            // Backfill the stable device id for configs saved before IDs existed
+            // (or whenever it's missing), so saving without changing the mic still
+            // persists the id. Match the stored name against the live devices.
+            const initialMicrophone = existing
+              ? {
+                  ...existing,
+                  deviceId:
+                    existing.deviceId ?? microphones().find((device) => device.name === existing.name)?.id ?? undefined,
+                }
+              : {
+                  deviceId: microphones()[0]?.id ?? undefined,
+                  name: microphones()[0]?.name || null,
+                  channel: 0,
+                  color: "sky",
+                  delay: 200,
+                  gain: 1,
+                  threshold: 2,
+                };
+
+            const [microphone, setMicrophone] = createSignal(initialMicrophone);
 
             const deleteMicrophone = () => {
               settingsStore.deleteMicrophone(id());
@@ -79,7 +94,10 @@ function MicrophoneComponent() {
                 label: t("settings.sections.microphones.microphone"),
                 value: () => microphone().name,
                 onChange: (name: string) => {
-                  setMicrophone((prev) => ({ ...prev, name }));
+                  // Persist the stable device id alongside the name so the mic can
+                  // still be matched if its name changes or collides.
+                  const deviceId = microphones().find((device) => device.name === name)?.id ?? undefined;
+                  setMicrophone((prev) => ({ ...prev, name, deviceId }));
                 },
                 options: microphones().map((microphone) => microphone.name),
               },
@@ -140,6 +158,19 @@ function MicrophoneComponent() {
                 onInput: (threshold: number) => {
                   setMicrophone((prev) => ({ ...prev, threshold }));
                 },
+              },
+              {
+                type: "custom",
+                interactive: false,
+                render: () => (
+                  <MicLevelMeter
+                    deviceId={() => microphone().deviceId}
+                    name={() => microphone().name}
+                    channel={() => microphone().channel}
+                    gain={() => microphone().gain}
+                    threshold={() => microphone().threshold}
+                  />
+                ),
               },
               {
                 type: "button",

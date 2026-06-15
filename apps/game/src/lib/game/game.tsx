@@ -1,17 +1,19 @@
 import createRAF from "@solid-primitives/raf";
 import { type Accessor, batch, createEffect, createSignal, type JSX } from "solid-js";
+
 import { commands } from "~/bindings";
 import type { SongPlayerRef } from "~/components/song-player";
 import { sendMidiNote } from "~/hooks/midi";
 import { beatToMs, beatToMsWithoutGap, msToBeat } from "~/lib/ultrastar/bpm";
-import type { LocalSong } from "~/lib/ultrastar/song";
+import type { Song } from "~/lib/ultrastar/song";
 import { roundStore, type Score } from "~/stores/round";
 import { settingsStore } from "~/stores/settings";
+
 import { type GameContextValue, GameProvider } from "./game-context";
 
 export interface CreateGameOptions {
   songPlayerRef?: SongPlayerRef;
-  song?: LocalSong;
+  song?: Song;
 }
 
 export { useGame } from "./game-context";
@@ -24,6 +26,10 @@ export function createGame(options: Accessor<CreateGameOptions>) {
   const [currentTime, setCurrentTime] = createSignal(0);
   const [duration, setDuration] = createSignal(0);
   const [scores, setScores] = createSignal<Score[]>([]);
+  const [preferInstrumental, setPreferInstrumental] = createSignal(
+    settingsStore.general().audioMode === "preferInstrumental",
+  );
+  const [pitches, setPitches] = createSignal<number[]>([]);
 
   const start = async () => {
     const opts = options();
@@ -32,8 +38,11 @@ export function createGame(options: Accessor<CreateGameOptions>) {
       throw new Error("No song provided");
     }
 
-    const samplesPerBeat = Math.floor((48000 * beatToMsWithoutGap(opts.song, 1)) / 1000);
-    await commands.startRecording(settingsStore.microphones(), samplesPerBeat);
+    await commands.startRecording(
+      roundStore.settings()?.songs[0]?.players.map((p) => p?.microphone) ?? [],
+      settingsStore.general().micPlaybackEnabled,
+      settingsStore.volume().micPlayback,
+    );
 
     setStarted(true);
     setPlaying(true);
@@ -66,9 +75,15 @@ export function createGame(options: Accessor<CreateGameOptions>) {
 
     const currentTimeMs = playerRef.getCurrentTime() * 1000;
 
-    const usedVoices = roundStore.settings()?.voices || [];
+    const usedVoices =
+      roundStore
+        .settings()
+        ?.songs[0]?.players.filter(Boolean)
+        .map((p) => p?.voice) ?? [];
 
     for (const voiceIndex of usedVoices) {
+      if (voiceIndex === undefined) continue;
+
       const voice = currentSong.voices[voiceIndex];
       if (!voice) continue;
 
@@ -90,6 +105,7 @@ export function createGame(options: Accessor<CreateGameOptions>) {
     let nextNoteTime: number | null = null;
 
     for (const voiceIndex of usedVoices) {
+      if (voiceIndex === undefined) continue;
       const voice = currentSong.voices[voiceIndex];
       if (!voice) continue;
 
@@ -122,7 +138,8 @@ export function createGame(options: Accessor<CreateGameOptions>) {
 
     const currentTime = opts.songPlayerRef.getCurrentTime();
     const duration = opts.songPlayerRef.getDuration();
-    const ms = currentTime * 1000;
+    const outputLatency = settingsStore.general().outputLatency;
+    const ms = currentTime * 1000 + outputLatency;
     const beat = msToBeat(opts.song, ms);
 
     batch(() => {
@@ -131,6 +148,26 @@ export function createGame(options: Accessor<CreateGameOptions>) {
       setCurrentTime(currentTime);
       setDuration(duration);
     });
+  });
+
+  const flooredBeat = () => Math.floor(beat());
+
+  createEffect(() => {
+    flooredBeat();
+    if (!started() || !playing()) return;
+
+    const song = options().song;
+    if (!song) return;
+
+    // One beat as the analysis window; Rust converts to samples and clamps it.
+    const windowMs = beatToMsWithoutGap(song, 1);
+
+    void (async () => {
+      const result = await commands.getPitches(windowMs);
+      if (result.status === "ok") {
+        setPitches(result.data);
+      }
+    })();
   });
 
   createEffect(() => {
@@ -144,6 +181,8 @@ export function createGame(options: Accessor<CreateGameOptions>) {
       stopLoop();
     }
   });
+
+  const playerCount = () => roundStore.settings()?.songs[0]?.players.filter(Boolean).length ?? 0;
 
   const addScore = (index: number, type: "normal" | "golden" | "bonus", value: number) => {
     setScores((prev) => {
@@ -175,6 +214,11 @@ export function createGame(options: Accessor<CreateGameOptions>) {
     duration,
     scores,
     addScore,
+    resetScores: () => setScores([]),
+    preferInstrumental,
+    setPreferInstrumental,
+    pitches,
+    playerCount,
   };
 
   const Provider = (props: { children: JSX.Element }) => <GameProvider value={values}>{props.children}</GameProvider>;

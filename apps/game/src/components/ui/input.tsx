@@ -1,7 +1,10 @@
 import { mergeRefs } from "@solid-primitives/refs";
 import { createEffect, createSignal, type JSX, type Ref } from "solid-js";
 import { Motion, Presence } from "solid-motionone";
+import { twMerge } from "tailwind-merge";
+
 import { keyMode, useNavigation } from "~/hooks/navigation";
+
 import { VirtualKeyboard } from "./virtual-keyboard";
 
 interface InputProps {
@@ -18,6 +21,7 @@ interface InputProps {
   gradient?: string;
   onMouseEnter?: () => void;
   maxLength?: number;
+  type?: "text" | "password";
 }
 
 export default function Input(props: InputProps) {
@@ -89,8 +93,10 @@ export default function Input(props: InputProps) {
 
   return (
     <>
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: This is a input */}
-      <div class="grid h-16 items-center overflow-hidden rounded-lg" onMouseEnter={props.onMouseEnter}>
+      <div
+        class={twMerge("grid h-16 items-center overflow-hidden rounded-lg", props.class)}
+        onMouseEnter={() => props.onMouseEnter?.()}
+      >
         <div
           class="col-start-1 row-start-1 h-full w-full bg-gradient-to-r transition-opacity"
           classList={{
@@ -99,21 +105,22 @@ export default function Input(props: InputProps) {
           }}
         />
         <div class="z-2 col-start-1 row-start-1 mx-auto grid w-full max-w-320 grid-cols-[1fr_3fr] items-center">
-          <div class="text-center font-bold text-xl">{props.label}</div>
+          <div class="text-center text-xl font-bold">{props.label}</div>
           <div class="flex items-center justify-center">
             <div class="w-full">
               <input
                 ref={mergeRefs(props.ref, (el) => {
                   inputRef = el;
                 })}
-                type="text"
+                type={props.type || "text"}
                 value={props.value || ""}
                 placeholder={props.placeholder}
+                aria-label={props.label || props.placeholder}
                 maxLength={props.maxLength}
-                onInput={props.onInput}
+                onInput={(event) => props.onInput?.(event)}
                 onFocus={handleFocus}
                 onBlur={handleBlur}
-                class={`w-full bg-transparent py-2 text-white focus:outline-none ${props.class || ""}`}
+                class="w-full bg-transparent py-2 text-xl text-white focus:outline-none"
               />
               <div class="h-0.5 w-full rounded-full bg-white" />
             </div>

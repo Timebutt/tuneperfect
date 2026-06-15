@@ -1,7 +1,10 @@
+import crypto from "node:crypto";
+
 import { addDays, differenceInSeconds } from "date-fns";
 import { and, eq, inArray } from "drizzle-orm";
 import jwt from "jsonwebtoken";
 import * as v from "valibot";
+
 import { env } from "../config/env";
 import { db } from "../lib/db";
 import * as schema from "../lib/db/schema";
@@ -15,7 +18,11 @@ export class LobbyService {
         id,
       },
       with: {
-        users: true,
+        users: {
+          columns: {
+            password: false,
+          },
+        },
         selectedClub: {
           with: {
             members: {
@@ -49,7 +56,7 @@ export class LobbyService {
   private generateLobbyCode(length = 8) {
     const characters = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
-    return Array.from({ length }, () => characters[Math.floor(Math.random() * characters.length)]).join("");
+    return Array.from({ length }, () => characters[crypto.randomInt(characters.length)]).join("");
   }
 
   public async generateLobbyToken(lobbyId: string) {
@@ -72,7 +79,9 @@ export class LobbyService {
   }
 
   async verifyLobbyToken(accessToken: string) {
-    const [error, decoded] = await tryCatch(() => jwt.verify(accessToken, env.JWT_SECRET));
+    const [error, decoded] = await tryCatch(() =>
+      jwt.verify(accessToken, env.JWT_SECRET, { issuer: env.API_URL, audience: env.API_URL, algorithms: ["HS256"] }),
+    );
 
     if (error) {
       return null;
@@ -94,6 +103,32 @@ export class LobbyService {
         lobbyId,
       })
       .where(eq(schema.users.id, userId));
+
+    // If no club has been selected for the lobby yet, auto-select one of the
+    // joining user's clubs so additional scores are shown without manual selection.
+    await this.autoSelectClubForLobby(lobbyId, userId);
+  }
+
+  private async autoSelectClubForLobby(lobbyId: string, userId: string) {
+    const lobby = await db.query.lobbies.findFirst({
+      where: { id: lobbyId },
+      columns: { id: true, clubId: true },
+    });
+
+    if (!lobby || lobby.clubId) {
+      return;
+    }
+
+    const membership = await db.query.clubMembers.findFirst({
+      where: { userId },
+      columns: { clubId: true },
+    });
+
+    if (!membership) {
+      return;
+    }
+
+    await db.update(schema.lobbies).set({ clubId: membership.clubId }).where(eq(schema.lobbies.id, lobbyId));
   }
 
   async leaveLobby(userId: string) {

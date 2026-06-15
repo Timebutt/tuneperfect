@@ -1,4 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/solid-router";
+
 import KeyHints from "~/components/key-hints";
 import Layout from "~/components/layout";
 import type { MenuItem } from "~/components/menu";
@@ -18,6 +19,11 @@ function PartyComponent() {
       type: "button",
       label: t("party.versus.title"),
       action: () => navigate({ to: "/party/versus/settings" }),
+    },
+    {
+      type: "button",
+      label: t("party.ticTacToe.title"),
+      action: () => navigate({ to: "/party/tic-tac-toe/settings" }),
     },
   ];
   return (

@@ -48,13 +48,14 @@ pub struct Song {
     pub end: Option<i32>,
     pub hash: String,
     pub album: Option<String>,
-    pub language: Option<String>,
-    pub edition: Option<String>,
-    pub genre: Option<String>,
+    pub language: Option<Vec<String>>,
+    pub edition: Option<Vec<String>>,
+    pub genre: Option<Vec<String>>,
     pub year: Option<i32>,
-    pub creator: Option<String>,
+    pub creator: Option<Vec<String>>,
     pub relative: Option<bool>,
     pub audio: Option<String>,
+    pub instrumental: Option<String>,
     pub cover: Option<String>,
     pub video: Option<String>,
     pub background: Option<String>,
@@ -62,6 +63,16 @@ pub struct Song {
     pub p2: Option<String>,
     #[serde(rename = "previewStart")]
     pub preview_start: Option<f64>,
+    pub version: Option<String>,
+    pub tags: Option<Vec<String>>,
+    #[serde(rename = "medleyStartBeat")]
+    pub medley_start_beat: Option<i32>,
+    #[serde(rename = "medleyEndBeat")]
+    pub medley_end_beat: Option<i32>,
+    #[serde(rename = "medleyStart")]
+    pub medley_start: Option<f64>,
+    #[serde(rename = "medleyEnd")]
+    pub medley_end: Option<f64>,
     pub voices: Vec<Voice>,
     #[serde(rename = "midiNote")]
     pub midi_note: Option<i32>
@@ -73,6 +84,8 @@ pub struct LocalSong {
     pub song: Song,
     #[serde(rename = "audioUrl")]
     pub audio_url: Option<String>,
+    #[serde(rename = "instrumentalUrl")]
+    pub instrumental_url: Option<String>,
     #[serde(rename = "videoUrl")]
     pub video_url: Option<String>,
     #[serde(rename = "coverUrl")]
@@ -83,4 +96,6 @@ pub struct LocalSong {
     pub replay_gain_track_gain: Option<f32>,
     #[serde(rename = "replayGainTrackPeak")]
     pub replay_gain_track_peak: Option<f32>,
+    #[serde(rename = "createdAt")]
+    pub created_at: Option<f64>,
 }

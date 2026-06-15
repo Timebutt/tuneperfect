@@ -1,8 +1,11 @@
 import { createFileRoute, useNavigate } from "@tanstack/solid-router";
 import { open } from "@tauri-apps/plugin-dialog";
-import { type Component, createEffect, createMemo, createSignal, For, on } from "solid-js";
-import KeyHints from "~/components/key-hints";
+import { createEffect, createMemo, createSignal, For, type JSX, on } from "solid-js";
+import IconFolder from "~icons/lucide/folder";
+import IconPlus from "~icons/lucide/plus";
+
 import Layout from "~/components/layout";
+import SettingsFooter from "~/components/settings-footer";
 import TitleBar from "~/components/title-bar";
 import IconButton from "~/components/ui/icon-button";
 import { createLoop } from "~/hooks/loop";
@@ -10,8 +13,6 @@ import { useNavigation } from "~/hooks/navigation";
 import { t } from "~/lib/i18n";
 import { playSound } from "~/lib/sound";
 import { songsStore } from "~/stores/songs";
-import IconFolder from "~icons/lucide/folder";
-import IconPlus from "~icons/lucide/plus";
 
 export const Route = createFileRoute("/settings/songs/")({
   component: SongsComponent,
@@ -64,7 +65,7 @@ function SongsComponent() {
     const buttons: {
       label: string;
       subtitle?: string;
-      icon: Component<{ class?: string }>;
+      icon: JSX.Element;
       action?: () => void;
       loading?: boolean;
     }[] = [];
@@ -72,7 +73,7 @@ function SongsComponent() {
       buttons.push({
         label: folderName(path),
         subtitle: getSongCount(path),
-        icon: IconFolder,
+        icon: <IconFolder class="text-6xl" />,
         action: () =>
           navigate({
             to: "/settings/songs/$path",
@@ -84,7 +85,12 @@ function SongsComponent() {
     }
 
     if (songsStore.paths().length < 7) {
-      buttons.push({ label: t("settings.add"), icon: IconPlus, action: pickFolder, loading: loading() });
+      buttons.push({
+        label: t("settings.add"),
+        icon: <IconPlus class="text-6xl" />,
+        action: pickFolder,
+        loading: loading(),
+      });
     }
 
     return buttons;
@@ -120,9 +126,9 @@ function SongsComponent() {
     <Layout
       intent="secondary"
       header={<TitleBar title={t("settings.title")} description={t("settings.sections.songs.title")} onBack={onBack} />}
-      footer={<KeyHints hints={["back", "navigate", "confirm"]} />}
+      footer={<SettingsFooter />}
     >
-      <div class="flex w-full flex-grow items-center justify-center gap-4">
+      <div class="flex w-full grow items-center justify-center gap-4">
         <For each={buttons()}>
           {(button, index) => (
             <IconButton

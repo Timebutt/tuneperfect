@@ -1,13 +1,18 @@
 import { Key } from "@solid-primitives/keyed";
-import { createMemo, createSignal, For } from "solid-js";
+import { createMemo, For, Show } from "solid-js";
+
+import { useGame } from "~/lib/game/game-context";
+import { getGapTolerance } from "~/lib/game/pitch";
 import { usePlayer } from "~/lib/game/player-context";
 import type { Note } from "~/lib/ultrastar/note";
 import { clamp } from "~/lib/utils/math";
-
-const ROW_COUNT = 16;
+import { settingsStore } from "~/stores/settings";
 
 export default function Pitch() {
+  const game = useGame();
   const player = usePlayer();
+  const isCompact = () => game.playerCount() > 2;
+  const ROW_COUNT = isCompact() ? 12 : 16;
 
   const averageNote = createMemo(() => {
     const phrase = player.phrase();
@@ -29,9 +34,7 @@ export default function Pitch() {
       return notes[0].length;
     }
 
-    // biome-ignore lint/style/noNonNullAssertion: Checked above
     const firstNote = notes[0]!;
-    // biome-ignore lint/style/noNonNullAssertion: Checked above
     const lastNote = notes.at(-1)!;
 
     return lastNote.startBeat + lastNote.length - firstNote.startBeat;
@@ -58,11 +61,7 @@ export default function Pitch() {
     const correctNoteRow = getNoteRow(beat.note.midiNote);
     const sungNoteRow = getNoteRow(beat.midiNote);
 
-    const possibleRows = [
-      sungNoteRow,
-      sungNoteRow - 12,
-      sungNoteRow + 12,
-    ];
+    const possibleRows = [sungNoteRow, sungNoteRow - 12, sungNoteRow + 12];
 
     let closestRow = sungNoteRow;
     let minDistance = Math.abs(correctNoteRow - sungNoteRow);
@@ -122,7 +121,13 @@ export default function Pitch() {
     for (let i = startBeat; i < endBeat; i++) {
       const beat = player.processedBeats.get(i);
       if (beat) {
-        currentProcessedBeats.push({ beat: i, note: beat.note, midiNote: beat.midiNote, isFirstInNote: beat.isFirstInNote });
+        currentProcessedBeats.push({
+          beat: i,
+          note: beat.note,
+          midiNote: beat.midiNote,
+          rawMidiNote: beat.rawMidiNote,
+          isFirstInNote: beat.isFirstInNote,
+        });
       }
     }
 
@@ -140,6 +145,7 @@ export default function Pitch() {
       return [];
     }
 
+    // oxlint-disable-next-line solid/reactivity
     return currentBeats.reduce((grouped, beat) => {
       const lastGroup = grouped[grouped.length - 1];
 
@@ -156,9 +162,11 @@ export default function Pitch() {
           length: 1,
           row: getProcessedBeatRow(beat),
           column: beat.beat - startBeat + 1,
+          rawMidiNotes: [beat.rawMidiNote],
         });
       } else {
         lastGroup.length++;
+        lastGroup.rawMidiNotes.push(beat.rawMidiNote);
       }
 
       return grouped;
@@ -168,13 +176,7 @@ export default function Pitch() {
   const micColor = () => `var(--color-${player.microphone().color}-500)`;
 
   return (
-    <div
-      class="grid flex-grow px-48"
-      classList={{
-        "pt-[2cqh] pb-[8cqh]": player.index() === 0,
-        "pt-[8cqh] pb-[2cqh]": player.index() === 1,
-      }}
-    >
+    <div class="grid grow" classList={{ "px-60 py-[2cqh]": isCompact(), "px-48 py-[2cqh]": !isCompact() }}>
       <div
         style={{
           "grid-template-rows": `repeat(${ROW_COUNT},1fr)`,
@@ -201,6 +203,8 @@ export default function Pitch() {
               column={groupedBeat().column}
               delayedBeat={player.delayedBeat()}
               micColor={micColor()}
+              rawMidiNotes={groupedBeat().rawMidiNotes}
+              sungMidiNote={groupedBeat().midiNote}
             />
           )}
         </Key>
@@ -217,10 +221,11 @@ interface PitchNoteProps {
 
 function SparkleParticles(props: { length: number }) {
   // Scale particles based on note length: base 4 particles + 2 per beat, capped at 16
-  const particleCount = Math.min(4 + Math.floor(props.length * 2), 16);
+  const particleCount = createMemo(() => Math.min(4 + Math.floor(props.length * 2), 16));
 
   // Generate random particles with different delays and positions
-  const particles = Array.from({ length: particleCount }, (_, i) => ({
+  // oxlint-disable-next-line solid/reactivity
+  const particles = Array.from({ length: particleCount() }, (_, i) => ({
     id: i,
     delay: Math.random() * 2,
     x: Math.random() * 100,
@@ -261,7 +266,7 @@ function PitchNote(props: PitchNoteProps) {
       }}
     >
       <div
-        class="-translate-y-1/4 relative h-2/1 w-full transform overflow-hidden rounded-full border-[0.15cqw] shadow-md"
+        class="relative h-2/1 w-full -translate-y-1/4 transform overflow-hidden rounded-full border-[0.15cqw] shadow-md"
         classList={{
           "border-yellow-400 bg-yellow-400/20": props.note.type.endsWith("Golden"),
           "border-white bg-black/20": !props.note.type.endsWith("Golden"),
@@ -282,27 +287,96 @@ interface ProcessedNoteProps {
   column: number;
   delayedBeat: number;
   micColor: string;
+  rawMidiNotes: number[];
+  sungMidiNote: number;
 }
 
 function ProcessedNote(props: ProcessedNoteProps) {
-  const [firstBeat] = createSignal(props.delayedBeat);
+  // The initial delayed beat acts as the fixed start reference for this note fill animation.
+  // oxlint-disable-next-line solid/reactivity
+  const firstBeat = props.delayedBeat;
 
   const fill = createMemo(() => {
     const delayedBeat = props.delayedBeat;
 
-    const fillPercentage = clamp(((delayedBeat - firstBeat()) / props.length) * 100, 0, 100);
+    const fillPercentage = clamp(((delayedBeat - firstBeat) / props.length) * 100, 0, 100);
 
-    if (delayedBeat - firstBeat() <= 1) {
+    if (delayedBeat - firstBeat <= 1) {
       return {
-        "clip-percentage": fillPercentage,
-        "width-percentage": 100 / props.length,
+        clipPercentage: fillPercentage,
+        widthPercentage: 100 / props.length,
       };
     }
 
     return {
-      "clip-percentage": 100,
-      "width-percentage": fillPercentage,
+      clipPercentage: 100,
+      widthPercentage: fillPercentage,
     };
+  });
+
+  const calculateAccuracyPosition = (rawMidi: number, targetMidi: number): number => {
+    const tolerance = getGapTolerance(settingsStore.general().difficulty);
+
+    let adjustedRawMidi = rawMidi;
+
+    while (adjustedRawMidi > targetMidi + 6) {
+      adjustedRawMidi -= 12;
+    }
+    while (adjustedRawMidi < targetMidi - 6) {
+      adjustedRawMidi += 12;
+    }
+
+    const diff = adjustedRawMidi - targetMidi;
+
+    const normalized = clamp(diff / tolerance, -1, 1);
+
+    return 50 - normalized * 50;
+  };
+
+  const points = createMemo(() => {
+    const isRap = props.note.type.startsWith("Rap");
+    if (!isRap && props.sungMidiNote !== props.note.midiNote) {
+      return [];
+    }
+
+    const targetMidi = props.note.midiNote;
+
+    return props.rawMidiNotes.map((rawMidi, i) => ({
+      x: i + 0.5,
+      y: calculateAccuracyPosition(rawMidi, targetMidi),
+    }));
+  });
+
+  const accuracyLine = createMemo(() => {
+    const currentPoints = points();
+    if (currentPoints.length === 0) return null;
+
+    const first = currentPoints[0];
+    if (!first) return null;
+
+    let d = `M 0 ${first.y} L ${first.x} ${first.y}`;
+
+    for (let i = 1; i < currentPoints.length; i++) {
+      const p0 = currentPoints[i - 1];
+      const p1 = currentPoints[i];
+
+      if (!p0 || !p1) continue;
+
+      const midX = (p0.x + p1.x) / 2;
+      const cp1x = midX;
+      const cp1y = p0.y;
+      const cp2x = midX;
+      const cp2y = p1.y;
+
+      d += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p1.x} ${p1.y}`;
+    }
+
+    const last = currentPoints.at(-1);
+    if (last) {
+      d += ` L ${props.rawMidiNotes.length} ${last.y}`;
+    }
+
+    return d;
   });
 
   return (
@@ -313,15 +387,41 @@ function ProcessedNote(props: ProcessedNoteProps) {
         "grid-column": `${props.column} / span ${props.length}`,
       }}
     >
-      <div class="-translate-y-1/4 absolute h-2/1 w-full transform p-[0.35cqw]">
-        <div
-          style={{
-            "clip-path": `polygon(0% 0%, ${fill()["clip-percentage"]}% 0%, ${fill()["clip-percentage"]}% 100%, 0% 100%)`,
-            width: `${fill()["width-percentage"]}%`,
-            "background-color": props.micColor,
-          }}
-          class="h-full w-full rounded-full"
-        />
+      <div class="absolute h-2/1 w-full -translate-y-1/4 transform p-[0.35cqw]">
+        <div class="relative h-full w-full">
+          <div
+            style={{
+              "clip-path": `polygon(0% 0%, ${fill().clipPercentage}% 0%, ${fill().clipPercentage}% 100%, 0% 100%)`,
+              width: `${fill().widthPercentage}%`,
+              "background-color": props.micColor,
+            }}
+            class="relative h-full w-full overflow-hidden rounded-full"
+          >
+            <Show when={accuracyLine()}>
+              {(accuracyLine) => (
+                <svg
+                  class="absolute top-0 left-0 h-full overflow-visible"
+                  style={{
+                    width: `${clamp((100 / fill().widthPercentage) * 100, 100, 200)}%`,
+                  }}
+                  viewBox={`0 0 ${props.length} 100`}
+                  preserveAspectRatio="none"
+                  aria-hidden="true"
+                >
+                  <title>Pitch accuracy indicator</title>
+                  <path
+                    d={accuracyLine()}
+                    stroke="white"
+                    stroke-width="2"
+                    fill="none"
+                    opacity="0.4"
+                    vector-effect="non-scaling-stroke"
+                  />
+                </svg>
+              )}
+            </Show>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -331,6 +431,7 @@ interface ProcessedBeat {
   beat: number;
   note: Note;
   midiNote: number;
+  rawMidiNote: number;
   isFirstInNote: boolean;
 }
 
@@ -338,4 +439,5 @@ interface DisplayedProcessedBeat extends ProcessedBeat {
   length: number;
   row: number;
   column: number;
+  rawMidiNotes: number[];
 }

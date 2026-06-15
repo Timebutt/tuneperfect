@@ -1,7 +1,4 @@
 import { For, type JSX } from "solid-js";
-import { keyMode } from "~/hooks/navigation";
-import { t } from "~/lib/i18n";
-
 import IconDownArrowKey from "~icons/sing/down-arrow-key";
 import IconEnterKey from "~icons/sing/enter-key";
 import IconEscKey from "~icons/sing/esc-key";
@@ -12,7 +9,10 @@ import IconLeftArrowKey from "~icons/sing/left-arrow-key";
 import IconRightArrowKey from "~icons/sing/right-arrow-key";
 import IconUpArrowKey from "~icons/sing/up-arrow-key";
 
-type HintType = "navigate" | "confirm" | "back";
+import { keyMode } from "~/hooks/navigation";
+import { t } from "~/lib/i18n";
+
+type HintType = "navigate" | "confirm" | "back" | "add-to-medley";
 
 interface KeyHintsProps {
   hints: HintType[];
@@ -26,6 +26,8 @@ export default function KeyHints(props: KeyHintsProps) {
       case "back":
         return isGamepad ? <IconGamepadB /> : <IconEscKey />;
       case "confirm":
+        return isGamepad ? <IconGamepadA /> : <IconEnterKey />;
+      case "add-to-medley":
         return isGamepad ? <IconGamepadA /> : <IconEnterKey />;
       case "navigate":
         return isGamepad ? (

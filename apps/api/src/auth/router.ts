@@ -1,21 +1,17 @@
 import { os } from "@orpc/server";
 import * as v from "valibot";
+
 import { base } from "../base";
 import { env } from "../config/env";
 import { logger } from "../lib/logger";
 import { userService } from "../user/service";
-import { defaultCookieOptions } from "../utils/cookie";
-import { executeWithConstantTime } from "../utils/security";
+import { cookieMaxAge, defaultCookieOptions } from "../utils/cookie";
+import { executeWithConstantTime, isValidRedirectUrl } from "../utils/security";
 import { oauthRouter } from "./oauth/router";
 import { authService } from "./service";
 
 export const authRouter = os.prefix("/auth").router({
   signUp: base
-    .errors({
-      EMAIL_ALREADY_EXISTS: {
-        status: 400,
-      },
-    })
     .meta({
       rateLimit: {
         limit: 10,
@@ -30,23 +26,31 @@ export const authRouter = os.prefix("/auth").router({
       }),
     )
     .handler(async ({ input, errors }) => {
-      const existingUser = await userService.getUserByEmail(input.email);
+      // Respond identically whether the email is registered or not to prevent
+      // account enumeration. Existing unverified accounts get a fresh
+      // verification email; existing verified accounts receive nothing.
+      await executeWithConstantTime(async () => {
+        const existingUser = await userService.getUserByEmail(input.email);
 
-      if (existingUser) {
-        throw errors.EMAIL_ALREADY_EXISTS();
-      }
+        if (existingUser) {
+          if (!existingUser.emailVerified) {
+            await authService.sendVerificationEmail(existingUser, { redirect: input.redirect });
+          }
+          return;
+        }
 
-      const user = await userService.createUser(input.email, input.password);
+        const user = await userService.createUser(input.email, input.password);
 
-      if (!user) {
-        throw errors.INTERNAL_SERVER_ERROR();
-      }
+        if (!user) {
+          throw errors.INTERNAL_SERVER_ERROR();
+        }
 
-      try {
-        await authService.sendVerificationEmail(user, { redirect: input.redirect });
-      } catch (error) {
-        logger.warn(error, "Failed to send verification email");
-      }
+        try {
+          await authService.sendVerificationEmail(user, { redirect: input.redirect });
+        } catch (error) {
+          logger.warn(error, "Failed to send verification email");
+        }
+      }, 1000);
     }),
 
   signIn: base
@@ -89,11 +93,11 @@ export const authRouter = os.prefix("/auth").router({
 
         context.setCookie?.("access_token", accessToken.token, {
           ...defaultCookieOptions,
-          maxAge: accessToken.expires.getTime() - Date.now(),
+          maxAge: cookieMaxAge(accessToken.expires),
         });
         context.setCookie?.("refresh_token", refreshToken.token, {
           ...defaultCookieOptions,
-          maxAge: refreshToken.expires.getTime() - Date.now(),
+          maxAge: cookieMaxAge(refreshToken.expires),
         });
       }, 500);
     }),
@@ -154,7 +158,8 @@ export const authRouter = os.prefix("/auth").router({
 
       await userService.updateUser(verificationToken.userId, { emailVerified: true });
 
-      context.resHeaders?.set("location", input.redirect || env.APP_URL);
+      const redirect = isValidRedirectUrl(input.redirect, [env.APP_URL]) ? input.redirect : env.APP_URL;
+      context.resHeaders?.set("location", redirect);
     }),
 
   requestPasswordReset: base
@@ -219,6 +224,7 @@ export const authRouter = os.prefix("/auth").router({
 
       const hashedPassword = await authService.hashPassword(input.password);
       await userService.updateUser(verificationToken.userId, { password: hashedPassword });
+      await authService.deleteAllRefreshTokensForUser(verificationToken.userId);
     }),
 
   providers: oauthRouter,
@@ -250,11 +256,11 @@ export const authRouter = os.prefix("/auth").router({
 
       context.setCookie?.("access_token", accessToken.token, {
         ...defaultCookieOptions,
-        maxAge: accessToken.expires.getTime() - Date.now(),
+        maxAge: cookieMaxAge(accessToken.expires),
       });
       context.setCookie?.("refresh_token", newRefreshToken.token, {
         ...defaultCookieOptions,
-        maxAge: newRefreshToken.expires.getTime() - Date.now(),
+        maxAge: cookieMaxAge(newRefreshToken.expires),
       });
     }),
 

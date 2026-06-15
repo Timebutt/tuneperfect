@@ -3,6 +3,7 @@ import { createForm, revalidateLogic } from "@tanstack/solid-form";
 import { createFileRoute, Link, useNavigate } from "@tanstack/solid-router";
 import { joinURL } from "ufo";
 import * as v from "valibot";
+
 import DiscordLogin from "~/components/discord-login";
 import GoogleLogin from "~/components/google-login";
 import Button from "~/components/ui/button";
@@ -35,7 +36,7 @@ function SignUpComponent() {
       confirmPassword: "",
     },
     onSubmit: async ({ value }) => {
-      const [error, _data, isDefined] = await safe(
+      const [error, _data, _isDefined] = await safe(
         client.auth.signUp.call({
           email: value.email,
           password: value.password,
@@ -44,13 +45,6 @@ function SignUpComponent() {
       );
 
       if (error) {
-        if (isDefined && error.code === "EMAIL_ALREADY_EXISTS") {
-          notify({
-            message: t("signUp.emailAlreadyExists"),
-            intent: "error",
-          });
-          return;
-        }
         notify({
           message: t("error.unknown"),
           intent: "error",
@@ -81,9 +75,9 @@ function SignUpComponent() {
   }));
 
   return (
-    <div class="flex flex-grow flex-col items-center justify-center p-2">
+    <div class="flex grow flex-col items-center justify-center p-2">
       <Card class="flex w-100 max-w-full flex-col gap-4">
-        <h1 class="font-semibold text-xl">{t("signUp.title")}</h1>
+        <h1 class="text-xl font-semibold">{t("signUp.title")}</h1>
         <form
           class="flex flex-col gap-4"
           onSubmit={(e) => {
@@ -156,7 +150,7 @@ function SignUpComponent() {
           <GoogleLogin redirect={absoluteRedirect()} />
         </div>
 
-        <p class="text-slate-500 text-xs">
+        <p class="text-xs text-slate-500">
           {t("signUp.privacyPolicyPrefix")}{" "}
           <a
             target="_blank"
@@ -178,7 +172,7 @@ function SignUpComponent() {
           {t("signUp.privacyPolicySuffix")}
         </p>
 
-        <p class="text-slate-500 text-sm">
+        <p class="text-sm text-slate-500">
           {t("signUp.haveAccount")}{" "}
           <Link
             to="/sign-in"

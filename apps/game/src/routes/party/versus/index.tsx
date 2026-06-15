@@ -3,6 +3,14 @@ import { createFileRoute, useNavigate } from "@tanstack/solid-router";
 import { batch, createMemo, createSignal, For, Show } from "solid-js";
 import { Transition } from "solid-transition-group";
 import { twMerge } from "tailwind-merge";
+import IconDices from "~icons/lucide/dices";
+import IconHash from "~icons/lucide/hash";
+import IconTrophy from "~icons/lucide/trophy";
+import IconF1Key from "~icons/sing/f1-key";
+import IconF2Key from "~icons/sing/f2-key";
+import IconGamepadLB from "~icons/sing/gamepad-lb";
+import IconGamepadRB from "~icons/sing/gamepad-rb";
+
 import KeyHints from "~/components/key-hints";
 import Layout from "~/components/layout";
 import Menu, { type MenuItem } from "~/components/menu";
@@ -12,21 +20,14 @@ import Avatar from "~/components/ui/avatar";
 import { keyMode, useNavigation } from "~/hooks/navigation";
 import { t } from "~/lib/i18n";
 import type { User } from "~/lib/types";
-import type { LocalSong } from "~/lib/ultrastar/song";
+import { isLocalSong, type LocalSong } from "~/lib/ultrastar/song";
 import { getColorVar } from "~/lib/utils/color";
 import { times } from "~/lib/utils/loop";
 import { getMaxScore, getRelativeScore } from "~/lib/utils/score";
 import { type Round, versusStore } from "~/stores/party/versus";
-import { roundStore, useRoundActions } from "~/stores/round";
+import { type PlayerSelection, roundStore, useRoundActions } from "~/stores/round";
 import { settingsStore } from "~/stores/settings";
 import { songsStore } from "~/stores/songs";
-import IconDices from "~icons/lucide/dices";
-import IconHash from "~icons/lucide/hash";
-import IconTrophy from "~icons/lucide/trophy";
-import IconF1Key from "~icons/sing/f1-key";
-import IconF2Key from "~icons/sing/f2-key";
-import IconGamepadLB from "~icons/sing/gamepad-lb";
-import IconGamepadRB from "~icons/sing/gamepad-rb";
 
 interface SongItem {
   song: LocalSong | null;
@@ -63,7 +64,7 @@ function calculatePlayerScores(players: User[], roundsData: Record<string, Round
       }
       return { user: player, wins, totalScore, roundsPlayed };
     })
-    .sort((a, b) => {
+    .toSorted((a, b) => {
       if (b.wins !== a.wins) {
         return b.wins - a.wins;
       }
@@ -106,18 +107,21 @@ export const Route = createFileRoute("/party/versus/")({
   loader: async () => {
     const settings = roundStore.settings();
     if (roundStore.settings()?.returnTo !== "/party/versus") return;
+    const lastResult = roundStore.results().at(-1);
 
-    const song = settings?.song;
-    if (!song) return;
+    if (!lastResult) return;
+
+    const song = lastResult.song.song;
+    // Versus mode only ever plays local songs.
+    if (!isLocalSong(song)) return;
+    const voice = song.voices[0];
+    const players = lastResult.song.players;
+    const scores = lastResult.scores;
 
     versusStore.setState((state) => ({
       ...state,
       playedSongs: [...state.playedSongs, song],
     }));
-
-    const voice = settings?.song?.voices[0];
-    const players = settings?.players ?? [];
-    const scores = roundStore.scores();
 
     if (scores.length !== 2 || !voice || players.length !== 2) {
       console.warn("Conditions not met for processing round results:", { settings, voice, players, scores });
@@ -154,8 +158,8 @@ export const Route = createFileRoute("/party/versus/")({
           score: currentScore,
         };
 
-        const playerRounds = newRounds[player.id] ?? [];
-        newRounds[player.id] = [...playerRounds, round];
+        const playerRounds = newRounds[player.player.id] ?? [];
+        newRounds[player.player.id] = [...playerRounds, round];
       }
 
       versusStore.setState((state) => ({
@@ -336,10 +340,17 @@ function VersusComponent() {
     const song = currentSong();
     if (!song) return;
 
-    const players = versusStore.state().matchups[0];
-    if (!players) return;
+    const matchup = versusStore.state().matchups[0];
+    if (!matchup) return;
 
-    roundActions.startRound({ song, players, voices: [0, 0], returnTo: "/party/versus" });
+    const players: PlayerSelection[] = [];
+    for (const [index, player] of matchup.entries()) {
+      const microphone = settingsStore.microphones()[index];
+      if (!microphone) continue;
+      players.push({ player: player, voice: 0, microphone });
+    }
+
+    roundActions.startRound({ songs: [{ song, players, mode: "single", length: "full" }], returnTo: "/party/versus" });
   };
 
   const menuItems: MenuItem[] = [
@@ -394,7 +405,7 @@ function VersusComponent() {
               {(currentSong) => (
                 <div class="h-full w-full">
                   <SongPlayer
-                    isPreview
+                    mode="preview"
                     volume={settingsStore.getVolume("preview")}
                     class="h-full w-full opacity-60"
                     playing
@@ -407,7 +418,7 @@ function VersusComponent() {
         </div>
       }
     >
-      <div class="grid flex-grow grid-cols-[2fr_5fr] items-center gap-4">
+      <div class="grid grow grid-cols-[2fr_5fr] items-center gap-4">
         <div>
           <VersusHighscoreList />
         </div>
@@ -416,7 +427,7 @@ function VersusComponent() {
           fallback={<VersusEndScreen winners={winners()} menuItems={menuItems} onBack={onBack} t={t} />}
         >
           {(matchup) => (
-            <div class="mask-x-from-99% mask-x-to-100% flex w-full flex-col items-center justify-center gap-14 py-4">
+            <div class="flex w-full flex-col items-center justify-center gap-14 mask-x-from-99% mask-x-to-100% py-4">
               <MatchupPlayerDisplay
                 player={matchup()[0]}
                 colorName={settingsStore.microphones()[0]?.color ?? "blue"}
@@ -439,14 +450,14 @@ function VersusComponent() {
                   {(data) => (
                     <>
                       <For each={times(PADDING)}>
-                        {() => <div class="flex-shrink-0" style={{ width: `${100 / TOTAL_SONG_ITEMS}%` }} />}
+                        {() => <div class="shrink-0" style={{ width: `${100 / TOTAL_SONG_ITEMS}%` }} />}
                       </For>
                       <Key each={data()} by={(item) => item.id}>
                         {(songItem, index) => (
                           <button
                             type="button"
                             onTransitionEnd={(event) => event.stopPropagation()}
-                            class="relative aspect-square w-full flex-shrink-0 transform p-2 transition-transform duration-250"
+                            class="relative aspect-square w-full shrink-0 transform p-2 transition-transform duration-250"
                             style={{ width: `${100 / TOTAL_SONG_ITEMS}%` }}
                             classList={{
                               "pointer-events-auto scale-130 cursor-pointer active:scale-125":
@@ -513,7 +524,7 @@ function VersusEndScreen(props: VersusEndScreenProps) {
       <div class="flex flex-1 flex-col items-center justify-center">
         <IconTrophy class="text-6xl" />
         <Show when={props.winners.length > 0}>
-          <p class="gradient-party bg-gradient-to-b bg-clip-text text-center font-bold text-6xl text-transparent">
+          <p class="gradient-party bg-gradient-to-b bg-clip-text text-center text-6xl font-bold text-transparent">
             <Show when={props.winners.length === 1} fallback={props.t("party.versus.draw")}>
               {props.winners[0]?.username} {props.t("party.versus.wins")}!
             </Show>
@@ -560,9 +571,9 @@ function MatchupPlayerDisplay(props: MatchupPlayerDisplayProps) {
         background: `linear-gradient(90deg, ${getColorVar(props.colorName, 600)}, ${getColorVar(props.colorName, 500)})`,
       }}
     >
-      <div class="flex flex-grow flex-row items-center gap-4 overflow-hidden">
+      <div class="flex grow flex-row items-center gap-4 overflow-hidden">
         <Avatar user={props.player} />
-        <div class="truncate font-bold text-xl">{props.player.username}</div>
+        <div class="truncate text-xl font-bold">{props.player.username}</div>
       </div>
       <div class="flex flex-row items-center gap-2">
         <Show when={props.playerIndex === 0}>
@@ -577,8 +588,8 @@ function MatchupPlayerDisplay(props: MatchupPlayerDisplayProps) {
         </Show>
         <button
           type="button"
-          class="cursor-pointer transition-all hover:opacity-75 active:scale-95 "
-          onClick={props.onReroll}
+          class="cursor-pointer transition-all hover:opacity-75 active:scale-95"
+          onClick={() => props.onReroll()}
         >
           <IconDices class="text-xl" />
         </button>
@@ -607,7 +618,7 @@ function VersusHighscoreList(props: VersusHighscoreListProps) {
             {(score) => (
               <div class="flex h-7 w-full items-center gap-2 overflow-hidden rounded-lg bg-black/20 pr-4">
                 <div
-                  class="flex h-full w-10 flex-shrink-0 items-center justify-center text-center"
+                  class="flex h-full w-10 shrink-0 items-center justify-center text-center"
                   classList={{
                     "bg-yellow-500": score.rank === 1,
                     "bg-white text-black": score.rank !== 1,
@@ -616,16 +627,16 @@ function VersusHighscoreList(props: VersusHighscoreListProps) {
                   {score.rank}.
                 </div>
 
-                <div class="flex flex-grow items-center gap-2 overflow-hidden">
-                  <Avatar user={score.user} class="h-6 w-6 flex-shrink-0" />
+                <div class="flex grow items-center gap-2 overflow-hidden">
+                  <Avatar user={score.user} class="h-6 w-6 shrink-0" />
                   <span class="truncate">{score.user.username || "?"}</span>
                 </div>
-                <div class="flex flex-shrink-0 flex-row items-center gap-4">
-                  <span class="flex flex-shrink-0 flex-row items-center gap-1 text-sm tabular-nums">
+                <div class="flex shrink-0 flex-row items-center gap-4">
+                  <span class="flex shrink-0 flex-row items-center gap-1 text-sm tabular-nums">
                     <IconTrophy />
                     {score.wins} / {score.roundsPlayed}
                   </span>
-                  <span class="flex flex-shrink-0 flex-row items-center gap-1 text-sm tabular-nums">
+                  <span class="flex shrink-0 flex-row items-center gap-1 text-sm tabular-nums">
                     <IconHash />
                     {score.totalScore.toLocaleString("en-US", {
                       maximumFractionDigits: 0,

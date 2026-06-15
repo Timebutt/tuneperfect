@@ -1,65 +1,136 @@
-import { safe } from "@orpc/client";
-import { Key } from "@solid-primitives/keyed";
 import { debounce } from "@solid-primitives/scheduled";
 import { createFileRoute, useNavigate } from "@tanstack/solid-router";
-import Fuse from "fuse.js";
-import { batch, createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
-import { Motion, Presence } from "solid-motionone";
-import HighscoreList, { type Highscore } from "~/components/highscore-list";
+import { createEffect, createMemo, createSignal, Match, on, Show, Switch } from "solid-js";
+import IconDices from "~icons/lucide/dices";
+import IconMenu from "~icons/lucide/menu";
+import IconMusic from "~icons/lucide/music";
+import IconDuet from "~icons/sing/duet";
+import IconF5Key from "~icons/sing/f5-key";
+import IconGamepadSelect from "~icons/sing/gamepad-select";
+import IconGamepadStart from "~icons/sing/gamepad-start";
+import IconTabKey from "~icons/sing/tab-key";
+
 import KeyHints from "~/components/key-hints";
 import Layout from "~/components/layout";
 import SongPlayer from "~/components/song-player";
+import { DebouncedHighscoreList } from "~/components/song-select/debounced-highscore-list";
+import { FilterButton } from "~/components/song-select/filter-button";
+import { FilterChips } from "~/components/song-select/filter-chips";
+import { FilterPopup } from "~/components/song-select/filter-popup";
+import { MedleyList } from "~/components/song-select/medley-list";
+import { MenuPopup } from "~/components/song-select/menu-popup";
+import { SearchButton } from "~/components/song-select/search-button";
+import { SearchPopup } from "~/components/song-select/search-popup";
+import { SongCard } from "~/components/song-select/song-card";
+import { SongGrid, type SongGridRef } from "~/components/song-select/song-grid";
+import {
+  type SearchFieldScope,
+  type SongFilters,
+  SongScroller,
+  type SongScrollerRef,
+  type SortOption,
+} from "~/components/song-select/song-scroller";
+import { SortSelect } from "~/components/song-select/sort-select";
 import TitleBar from "~/components/title-bar";
-import { VirtualKeyboard } from "~/components/ui/virtual-keyboard";
 import { keyMode, useNavigation } from "~/hooks/navigation";
+import { countActiveFilters, DEFAULT_FILTERS } from "~/hooks/use-song-filter";
 import { t } from "~/lib/i18n";
-import { client } from "~/lib/orpc";
 import { playSound } from "~/lib/sound";
 import type { LocalSong } from "~/lib/ultrastar/song";
-import { lobbyStore } from "~/stores/lobby";
+import { localStore } from "~/stores/local";
+import { medleyStore } from "~/stores/medley";
+import { selectionStore } from "~/stores/selection";
 import { settingsStore } from "~/stores/settings";
 import { songsStore } from "~/stores/songs";
-import IconDices from "~icons/lucide/dices";
-import IconMusic from "~icons/lucide/music";
-import IconSearch from "~icons/lucide/search";
-import IconDuet from "~icons/sing/duet";
-import IconF3Key from "~icons/sing/f3-key";
-import IconF4Key from "~icons/sing/f4-key";
-import IconF5Key from "~icons/sing/f5-key";
-import IconF6Key from "~icons/sing/f6-key";
-import IconGamepadLB from "~icons/sing/gamepad-lb";
-import IconGamepadRB from "~icons/sing/gamepad-rb";
-import IconGamepadStart from "~icons/sing/gamepad-start";
-import IconGamepadY from "~icons/sing/gamepad-y";
-import IconTriangleLeft from "~icons/sing/triangle-left";
-import IconTriangleRight from "~icons/sing/triangle-right";
-
-interface SongItem {
-  song: LocalSong;
-  id: string;
-}
 
 export const Route = createFileRoute("/sing/")({
   component: SingComponent,
 });
 
-const [currentSong, setCurrentSong] = createSignal<LocalSong | null>();
-const [searchQuery, setSearchQuery] = createSignal("");
-const [searchFilter, setSearchFilter] = createSignal<"all" | "artist" | "title" | "year" | "genre" | "language" | "edition" | "creator">(
-  "all"
-);
-const [searchPopupOpen, setSearchPopupOpen] = createSignal(false);
-const [sort, setSort] = createSignal<"artist" | "title" | "year">("artist");
-const [filteredSongCount, setFilteredSongCount] = createSignal(songsStore.songs().length);
+type OpenPanel = "search" | "filter" | "menu";
 
-const SORT_OPTIONS = ["artist", "title", "year"] as const;
+const [currentSong, setCurrentSong] = createSignal<LocalSong | null>(null);
+const [searchQuery, setSearchQuery] = createSignal("");
+const [searchFieldScope, setSearchFieldScope] = createSignal<SearchFieldScope>("all");
+const [filters, setFilters] = createSignal<SongFilters>({ ...DEFAULT_FILTERS });
+const [openPanel, setOpenPanel] = createSignal<OpenPanel | null>(null);
+const [sort, setSort] = createSignal<SortOption>("artist");
+const [filteredSongCount, setFilteredSongCount] = createSignal(0);
+
+const togglePanel = (panel: OpenPanel) => {
+  setOpenPanel((current) => (current === panel ? null : panel));
+};
 
 function SingComponent() {
-  if (!currentSong()) {
-    setCurrentSong(songsStore.songs()[0] || null);
-  }
-
   const navigate = useNavigate();
+  const songs = createMemo(() => songsStore.songs());
+
+  // Double-buffered preview player — two persistent SongPlayer instances that crossfade
+  const [slotASong, setSlotASong] = createSignal<LocalSong | null>(currentSong());
+  const [slotBSong, setSlotBSong] = createSignal<LocalSong | null>(null);
+  const [activeSlot, setActiveSlot] = createSignal<"a" | "b">("a");
+  let cleanupTimeout: ReturnType<typeof setTimeout> | undefined;
+  let pendingSwap = false;
+
+  const clearActiveSlot = () => {
+    clearTimeout(cleanupTimeout);
+    if (activeSlot() === "a") setSlotASong(null);
+    else setSlotBSong(null);
+  };
+
+  const swapToSong = (song: LocalSong | null) => {
+    clearTimeout(cleanupTimeout);
+
+    const current = activeSlot();
+    const next = current === "a" ? "b" : "a";
+
+    if (next === "a") setSlotASong(song);
+    else setSlotBSong(song);
+
+    setActiveSlot(next);
+
+    cleanupTimeout = setTimeout(() => {
+      if (current === "a") setSlotASong(null);
+      else setSlotBSong(null);
+    }, 600);
+  };
+
+  let latestSongHash: string | null = null;
+
+  // oxlint-disable-next-line solid/reactivity
+  const debouncedSwap = debounce((song: LocalSong | null) => {
+    pendingSwap = false;
+    if (song && song.hash !== latestSongHash) return;
+    swapToSong(song);
+  }, 200);
+
+  createEffect(() => {
+    if (!currentSong()) {
+      const firstSong = songs()[0];
+      if (firstSong) {
+        setCurrentSong(firstSong);
+      }
+    }
+  });
+
+  createEffect(
+    on(currentSong, (song) => {
+      latestSongHash = song?.hash ?? null;
+      if (pendingSwap) {
+        clearActiveSlot();
+      }
+      pendingSwap = true;
+      debouncedSwap(song);
+    }),
+  );
+
+  const isMedley = createMemo(() => medleyStore.songs().length > 0);
+
+  let scrollerRef: SongScrollerRef | undefined;
+  let gridRef: SongGridRef | undefined;
+
+  const songSelectStyle = () => settingsStore.general().songSelectStyle;
+
   const onBack = () => {
     if (searchQuery().trim()) {
       setSearchQuery("");
@@ -67,44 +138,92 @@ function SingComponent() {
       return;
     }
 
+    if (countActiveFilters(filters()) > 0) {
+      setFilters({ ...DEFAULT_FILTERS });
+      playSound("confirm");
+      return;
+    }
+
     playSound("confirm");
     navigate({ to: "/home" });
   };
-  const [animationsDisabled, setAnimationsDisabled] = createSignal(false);
-  const [isFastScrolling, setIsFastScrolling] = createSignal(false);
 
-  const startGame = (song: LocalSong) => {
+  const startRegular = (song: LocalSong) => {
     playSound("confirm");
-    navigate({ to: "/sing/$hash", params: { hash: song.hash } });
+    selectionStore.set([song], "single");
+    navigate({ to: "/sing/select" });
+  };
+
+  const startMedley = () => {
+    playSound("confirm");
+    selectionStore.set(medleyStore.songs(), "medley");
+    navigate({ to: "/sing/select" });
   };
 
   const selectRandomSong = () => {
-    setAnimationsDisabled(true);
-
-    const songs = songsStore.songs();
-    const randomIndex = Math.floor(Math.random() * songs.length);
-    const randomSong = songs[randomIndex];
+    const randomSong = songSelectStyle() === "grid" ? gridRef?.goToRandomSong() : scrollerRef?.goToRandomSong();
     if (randomSong) {
       setCurrentSong(randomSong);
     }
+  };
 
-    setTimeout(() => {
-      setAnimationsDisabled(false);
-    }, 0);
+  const startRandomMedley = () => {
+    const songsList = songs();
+    const nonDuetSongs = songsList.filter((song) => song.voices.length < 2);
+
+    if (nonDuetSongs.length === 0) {
+      return;
+    }
+
+    const selectedSongs: LocalSong[] = [];
+    const targetCount = 5;
+
+    // Try to dedup if we have enough songs
+    if (nonDuetSongs.length >= targetCount) {
+      const available = [...nonDuetSongs];
+      for (let i = 0; i < targetCount; i++) {
+        const randomIndex = Math.floor(Math.random() * available.length);
+        const song = available[randomIndex];
+        if (song) {
+          selectedSongs.push(song);
+          available.splice(randomIndex, 1);
+        }
+      }
+    } else {
+      // Not enough songs to dedup, pick random ones allowing duplicates
+      for (let i = 0; i < targetCount; i++) {
+        const randomIndex = Math.floor(Math.random() * nonDuetSongs.length);
+        const song = nonDuetSongs[randomIndex];
+        if (song) {
+          selectedSongs.push(song);
+        }
+      }
+    }
+
+    playSound("confirm");
+    selectionStore.set(selectedSongs, "medley");
+    navigate({ to: "/sing/select" });
   };
 
   const moveSorting = (direction: "left" | "right") => {
+    const SORT_OPTIONS: SortOption[] = ["artist", "title", "year", "date"];
     const currentIndex = SORT_OPTIONS.indexOf(sort());
     const newIndex = (currentIndex + (direction === "left" ? -1 : 1) + SORT_OPTIONS.length) % SORT_OPTIONS.length;
     setSort(SORT_OPTIONS[newIndex] || "artist");
   };
 
-  useNavigation(() => ({
+  useNavigation({
     onKeydown(event) {
       if (event.action === "back") {
         onBack();
       } else if (event.action === "search") {
-        setSearchPopupOpen(!searchPopupOpen());
+        togglePanel("search");
+        playSound("select");
+      } else if (event.action === "filter") {
+        togglePanel("filter");
+        playSound("select");
+      } else if (event.action === "menu") {
+        togglePanel("menu");
         playSound("select");
       } else if (event.action === "random") {
         selectRandomSong();
@@ -115,18 +234,34 @@ function SingComponent() {
       } else if (event.action === "sort-right") {
         moveSorting("right");
         playSound("select");
+      } else if (event.action === "add-to-medley") {
+        const song = currentSong();
+        if (song) {
+          medleyStore.add(song);
+          playSound("select");
+        }
+      } else if (event.action === "start-random-medley") {
+        startRandomMedley();
       }
     },
     onKeyup(event) {
       if (event.action === "confirm") {
+        if (isMedley()) {
+          startMedley();
+          return;
+        }
+
         const song = currentSong();
         if (song) {
-          startGame(song);
-          playSound("confirm");
+          startRegular(song);
         }
       }
     },
-  }));
+  });
+
+  const handleCenteredItemChange = (song: LocalSong | null) => {
+    setCurrentSong(song);
+  };
 
   return (
     <Layout
@@ -136,8 +271,8 @@ function SingComponent() {
           <KeyHints hints={["back", "navigate", "confirm"]} />
           <div class="flex items-center gap-12">
             <div class="flex items-center gap-2">
-              <Show when={keyMode() === "keyboard"} fallback={<IconGamepadY class="text-sm" />}>
-                <IconF4Key class="text-sm" />
+              <Show when={keyMode() === "keyboard"} fallback={<IconGamepadSelect class="text-sm" />}>
+                <IconF5Key class="text-sm" />
               </Show>
               <button
                 type="button"
@@ -147,790 +282,239 @@ function SingComponent() {
                 <IconDices />
               </button>
             </div>
-            <div class="flex items-center gap-2">
-              <Show when={keyMode() === "keyboard"} fallback={<IconGamepadLB class="text-sm" />}>
-                <IconF5Key class="text-sm" />
-              </Show>
-              <button
-                type="button"
-                class="flex cursor-pointer items-center gap-2 transition-all hover:opacity-75 active:scale-95"
-                onClick={() => moveSorting("left")}
-              >
-                <IconTriangleLeft />
-              </button>
-              <div>
-                <For each={SORT_OPTIONS}>
-                  {(sortKey) => (
-                    <button
-                      type="button"
-                      class="gradient-sing cursor-pointer rounded-full px-2 text-md text-white capitalize transition-all hover:opacity-75 active:scale-95"
-                      classList={{
-                        "gradient-sing bg-gradient-to-b shadow-xl": sortKey.toLowerCase() === sort(),
-                      }}
-                      onClick={() => setSort(sortKey)}
-                    >
-                      {t(`sing.sort.${sortKey}`)}
-                    </button>
-                  )}
-                </For>
-              </div>
-
-              <button
-                type="button"
-                class="cursor-pointer transition-all hover:opacity-75 active:scale-95"
-                onClick={() => moveSorting("right")}
-              >
-                <IconTriangleRight />
-              </button>
-              <Show when={keyMode() === "keyboard"} fallback={<IconGamepadRB class="text-sm" />}>
-                <IconF6Key class="text-sm" />
-              </Show>
-            </div>
+            <SortSelect selected={sort()} onSelect={setSort} />
           </div>
         </div>
       }
       header={
-        <div class="flex items-center gap-20">
-          <TitleBar title={t("sing.songs")} onBack={onBack} />
-          <div class="relative flex items-center gap-4">
-            <SearchButton searchQuery={searchQuery()} searchFilter={searchFilter()} onClick={() => setSearchPopupOpen(true)} />
-
-            <Show when={searchPopupOpen()}>
-              <SearchPopup
+        <div class="flex items-center justify-between gap-20">
+          <div class="flex items-center gap-20">
+            <TitleBar title={t("sing.songs")} onBack={onBack} />
+            <div class="relative flex items-center gap-4">
+              <SearchButton
                 searchQuery={searchQuery()}
-                searchFilter={searchFilter()}
-                onSearchQuery={setSearchQuery}
-                onSearchFilter={setSearchFilter}
-                onClose={() => setSearchPopupOpen(false)}
+                searchFieldScope={searchFieldScope()}
+                onClick={() => setOpenPanel("search")}
+              />
+
+              <Show when={openPanel() === "search"}>
+                <SearchPopup
+                  searchQuery={searchQuery()}
+                  searchFieldScope={searchFieldScope()}
+                  onSearchQuery={setSearchQuery}
+                  onSearchFieldScope={setSearchFieldScope}
+                  onClose={() => setOpenPanel(null)}
+                />
+              </Show>
+
+              <div class="relative">
+                <FilterButton onClick={() => setOpenPanel("filter")} />
+
+                <Show when={openPanel() === "filter"}>
+                  <FilterPopup
+                    songs={songs()}
+                    filters={filters()}
+                    onChange={setFilters}
+                    onClose={() => setOpenPanel(null)}
+                  />
+                </Show>
+              </div>
+
+              <FilterChips filters={filters()} onChange={setFilters} />
+
+              <div class="flex items-center gap-2 text-sm opacity-80">
+                <IconMusic />
+                <Show
+                  when={filteredSongCount() !== songs().length}
+                  fallback={
+                    <span>
+                      {songs().length === 1
+                        ? t("sing.songCount.one", { count: songs().length })
+                        : t("sing.songCount.other", { count: songs().length })}
+                    </span>
+                  }
+                >
+                  <span>{t("sing.songCount.filtered", { filtered: filteredSongCount(), total: songs().length })}</span>
+                </Show>
+              </div>
+            </div>
+          </div>
+
+          <div class="relative">
+            <button
+              type="button"
+              class="flex cursor-pointer items-center gap-2 transition-all hover:opacity-75 active:scale-95"
+              onClick={() => setOpenPanel("menu")}
+            >
+              <Show when={keyMode() === "keyboard"} fallback={<IconGamepadStart class="text-sm" />}>
+                <IconTabKey class="text-sm" />
+              </Show>
+              <IconMenu class="text-2xl" />
+            </button>
+
+            <Show when={openPanel() === "menu"}>
+              <MenuPopup
+                onClose={() => setOpenPanel(null)}
+                onStartRandomMedley={() => {
+                  startRandomMedley();
+                  setOpenPanel(null);
+                }}
+                onAddToMedley={() => {
+                  const song = currentSong();
+                  if (song) {
+                    medleyStore.add(song);
+                    playSound("select");
+                  }
+                  setOpenPanel(null);
+                }}
+                onSearchUsdb={() => {
+                  setOpenPanel(null);
+                  playSound("confirm");
+                  navigate({ to: "/sing/online-loading" });
+                }}
               />
             </Show>
-
-            <div class="flex items-center gap-2 text-sm opacity-80">
-              <IconMusic />
-              <Show
-                when={filteredSongCount() !== songsStore.songs().length}
-                fallback={
-                  <span>
-                    {songsStore.songs().length === 1
-                      ? t("sing.songCount.one", { count: songsStore.songs().length })
-                      : t("sing.songCount.other", { count: songsStore.songs().length })}
-                  </span>
-                }
-              >
-                <span>{t("sing.songCount.filtered", { filtered: filteredSongCount(), total: songsStore.songs().length })}</span>
-              </Show>
-            </div>
           </div>
         </div>
       }
       background={
         <div class="relative h-full w-full">
-          <Presence>
-            <Show when={!isFastScrolling() && currentSong()} keyed>
-              {(currentSong) => {
-                return (
-                  <Motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.5 }}
-                    class="absolute inset-0 z-1"
-                  >
-                    <SongPlayer
-                      isPreview
-                      volume={settingsStore.getVolume("preview")}
-                      class="h-full w-full opacity-60"
-                      playing
-                      song={currentSong}
-                    />
-                  </Motion.div>
-                );
-              }}
-            </Show>
-          </Presence>
-        </div>
-      }
-    >
-      <div class="relative grid h-full grid-rows-[1fr_auto]">
-        <div class="flex flex-grow items-center">
-          <div class="relative flex flex-grow flex-col">
-            <p class="text-xl">{currentSong()?.artist}</p>
-            <div class="max-w-200">
-              <span class="gradient-sing bg-gradient-to-b bg-clip-text font-bold text-6xl text-transparent ">{currentSong()?.title}</span>
-            </div>
-            <div class="absolute top-full">
-              <Show when={(currentSong()?.voices.length || 0) > 1}>
-                <IconDuet />
-              </Show>
-            </div>
+          <div
+            class="absolute inset-0 z-1 transition-opacity duration-500"
+            style={{ opacity: activeSlot() === "a" && slotASong() ? 1 : 0 }}
+          >
+            <SongPlayer
+              mode="preview"
+              volume={settingsStore.getVolume("preview")}
+              class="h-full w-full opacity-60"
+              playing={activeSlot() === "a" && !!slotASong()}
+              song={slotASong()}
+            />
           </div>
-          <Show when={currentSong()}>{(song) => <DebouncedHighscoreList songHash={song().hash} />}</Show>
+          <div
+            class="absolute inset-0 z-1 transition-opacity duration-500"
+            style={{ opacity: activeSlot() === "b" && slotBSong() ? 1 : 0 }}
+          >
+            <SongPlayer
+              mode="preview"
+              volume={settingsStore.getVolume("preview")}
+              class="h-full w-full opacity-60"
+              playing={activeSlot() === "b" && !!slotBSong()}
+              song={slotBSong()}
+            />
+          </div>
         </div>
-        <div>
-          <SongScroller
-            searchQuery={searchQuery()}
-            searchFilter={searchFilter()}
-            onSongChange={setCurrentSong}
-            onSelect={startGame}
-            songs={songsStore.songs()}
-            sort={sort()}
-            currentSong={currentSong() || null}
-            animationsDisabled={animationsDisabled()}
-            onIsFastScrolling={setIsFastScrolling}
-            onFilteredSongsChange={setFilteredSongCount}
-          />
-        </div>
-      </div>
-    </Layout>
-  );
-}
-
-interface SongScrollerProps {
-  songs: LocalSong[];
-  sort: "artist" | "title" | "year";
-  currentSong: LocalSong | null;
-  animationsDisabled: boolean;
-  searchQuery: string;
-  searchFilter: "all" | "artist" | "title" | "year" | "genre" | "language" | "edition" | "creator";
-  onSongChange?: (song: LocalSong | null) => void;
-  onSelect?: (song: LocalSong) => void;
-  onIsFastScrolling?: (fastScrolling: boolean) => void;
-  onFilteredSongsChange?: (count: number) => void;
-}
-
-const DISPLAYED_SONGS = 11;
-const MIDDLE_SONG_INDEX = Math.floor(DISPLAYED_SONGS / 2);
-
-const positiveModulo = (n: number, m: number) => ((n % m) + m) % m;
-
-function SongScroller(props: SongScrollerProps) {
-  const [isPressed, setIsPressed] = createSignal(false);
-  const [isHeld, setIsHeld] = createSignal(false);
-  const [isFastScrolling, setIsFastScrolling] = createSignal(false);
-  const [animating, setAnimating] = createSignal<null | "left" | "right">(null);
-  const [pendingDirection, setPendingDirection] = createSignal<null | "left" | "right">(null);
-
-  const [debouncedSearchQuery, setDebouncedSearchQuery] = createSignal("");
-  
-  const shouldDebounce = () => props.songs.length > 1000;
-  
-  const debouncedSetQuery = debounce((query: string) => {
-    setDebouncedSearchQuery(query);
-  }, 500);
-  
-  createEffect(() => {
-    if (shouldDebounce()) {
-      debouncedSetQuery(props.searchQuery);
-    } else {
-      setDebouncedSearchQuery(props.searchQuery);
-    }
-  });
-  
-  const fuseInstance = createMemo(() => {
-    const keys =
-      props.searchFilter === "all" ? ["title", "artist", "year", "genre", "language", "edition", "creator"] : [props.searchFilter];
-
-    return new Fuse(props.songs, {
-      keys,
-      threshold: 0.1,
-      includeScore: true,
-      ignoreLocation: true,
-    });
-  });
-
-  const filteredAndSortedSongs = createMemo(() => {
-    let songs = props.songs;
-
-    if (debouncedSearchQuery().trim()) {
-      const query = debouncedSearchQuery().toLowerCase().trim();
-      const searchResults = fuseInstance().search(query);
-      songs = searchResults.map((result) => result.item);
-    }
-
-    if (songs.length === 0) {
-      return [];
-    }
-
-    return songs.toSorted((a: LocalSong, b: LocalSong) => {
-      if (props.sort === "title") {
-        return a.title.localeCompare(b.title);
       }
-      if (props.sort === "year") {
-        if (a.year === null && b.year === null) return 0;
-        if (a.year === null) return 1;
-        if (b.year === null) return -1;
-        return a.year - b.year;
-      }
-      return a.artist.localeCompare(b.artist);
-    });
-  });
-
-  const calculateIndex = (songs: LocalSong[], currentSong: LocalSong | null): number => {
-    if (songs.length === 0) return 0;
-    if (!currentSong) return 0;
-    const index = songs.findIndex((song) => song === currentSong);
-    return index === -1 ? 0 : index;
-  };
-
-  const generateDisplayedSongs = (songs: LocalSong[], centerIndex: number): SongItem[] => {
-    const numSongs = songs.length;
-    if (numSongs === 0) return [];
-
-    const result: SongItem[] = [];
-    const offset = MIDDLE_SONG_INDEX;
-
-    for (let i = 0; i < DISPLAYED_SONGS; i++) {
-      const relativeIndex = i - offset;
-      const songIndex = positiveModulo(centerIndex + relativeIndex, numSongs);
-      const song = songs[songIndex];
-      if (song) {
-        result.push({ song, id: crypto.randomUUID() });
-      } else if (numSongs > 0) {
-        const firstSong = songs[0];
-        if (firstSong) {
-          result.push({ song: firstSong, id: crypto.randomUUID() });
-        }
-      }
-    }
-    return result;
-  };
-
-  const initialSongs = filteredAndSortedSongs();
-  const [currentIndex, setCurrentIndex] = createSignal(calculateIndex(initialSongs, props.currentSong));
-  const [displayedSongs, setDisplayedSongs] = createSignal<SongItem[]>(generateDisplayedSongs(initialSongs, currentIndex()));
-
-  createEffect(
-    on(
-      [() => props.currentSong, filteredAndSortedSongs],
-      ([currentSongProp, songs]) => {
-        const newIndex = calculateIndex(songs, currentSongProp);
-        const newCurrentSong = songs.length > 0 ? songs[newIndex] : null;
-
-        setCurrentIndex(newIndex);
-        setDisplayedSongs(generateDisplayedSongs(songs, newIndex));
-
-        if (newCurrentSong !== currentSongProp) {
-          props.onSongChange?.(newCurrentSong || null);
-        }
-      },
-      { defer: true }
-    )
-  );
-
-  useNavigation(() => ({
-    onKeydown(event) {
-      if (event.action === "left") {
-        if (animating()) {
-          setPendingDirection("left");
-        } else {
-          animateTo("left");
-        }
-        playSound("select");
-      } else if (event.action === "right") {
-        if (animating()) {
-          setPendingDirection("right");
-        } else {
-          animateTo("right");
-        }
-        playSound("select");
-      } else if (event.action === "confirm") {
-        setIsPressed(true);
-      }
-    },
-
-    onKeyup(event) {
-      if (event.action === "confirm") {
-        setIsPressed(false);
-
-        if (!animating() && props.currentSong) {
-          const displayed = displayedSongs();
-          const middleDisplayedSong = displayed[MIDDLE_SONG_INDEX];
-          if (middleDisplayedSong && middleDisplayedSong.song === props.currentSong) {
-            props.onSelect?.(props.currentSong);
-          }
-        }
-      } else if (event.action === "left" || event.action === "right") {
-        setIsHeld(false);
-        if (!isFastScrolling()) {
-          props.onIsFastScrolling?.(false);
-        }
-      }
-    },
-
-    onHold(event) {
-      if (event.action === "left") {
-        setIsHeld(true);
-        if (!animating()) {
-          animateTo("left");
-          playSound("select");
-        }
-      } else if (event.action === "right") {
-        setIsHeld(true);
-        if (!animating()) {
-          animateTo("right");
-          playSound("select");
-        }
-      }
-    },
-  }));
-
-  const animateTo = (direction: "left" | "right") => {
-    if (animating()) {
-      if (!isHeld()) return;
-    }
-
-    const songs = filteredAndSortedSongs();
-    if (songs.length === 0) return;
-
-    if (isHeld()) {
-      props.onIsFastScrolling?.(true);
-      setIsFastScrolling(true);
-    }
-
-    setAnimating(direction);
-  };
-
-  const onTransitionEnd = () => {
-    const direction = animating();
-    if (!direction) {
-      return;
-    }
-
-    const songs = filteredAndSortedSongs();
-    if (songs.length === 0) {
-      batch(() => {
-        setCurrentIndex(0);
-        if (props.currentSong !== null) props.onSongChange?.(null);
-        setAnimating(null);
-        setIsHeld(false);
-        setIsFastScrolling(false);
-        props.onIsFastScrolling?.(false);
-      });
-      return;
-    }
-
-    const numSongs = songs.length;
-    let nextIndex: number;
-
-    if (direction === "left") {
-      nextIndex = positiveModulo(currentIndex() - 1, numSongs);
-    } else {
-      nextIndex = positiveModulo(currentIndex() + 1, numSongs);
-    }
-
-    const nextSong = songs[nextIndex];
-
-    batch(() => {
-      setCurrentIndex(nextIndex);
-
-      if (numSongs > 1) {
-        if (direction === "left") {
-          const newFirstSongIndex = positiveModulo(nextIndex - MIDDLE_SONG_INDEX, numSongs);
-          const song = songs[newFirstSongIndex];
-          if (song) {
-            setDisplayedSongs((d) => [{ song, id: crypto.randomUUID() }, ...d.slice(0, -1)]);
-          }
-        } else {
-          const newLastSongIndex = positiveModulo(nextIndex + MIDDLE_SONG_INDEX, numSongs);
-          const song = songs[newLastSongIndex];
-          if (song) {
-            setDisplayedSongs((d) => [...d.slice(1), { song, id: crypto.randomUUID() }]);
-          }
-        }
-      } else if (numSongs === 1) {
-        if (direction === "left") {
-          setDisplayedSongs((d) => {
-            const last = d.at(-1);
-            if (!last) return d;
-            return [last, ...d.slice(0, -1)];
-          });
-        } else {
-          setDisplayedSongs((d) => {
-            const first = d[0];
-            if (!first) return d;
-            return [...d.slice(1), first];
-          });
-        }
-      }
-
-      if (nextSong && nextSong !== props.currentSong) {
-        props.onSongChange?.(nextSong);
-      }
-      setAnimating(null);
-
-      const pending = pendingDirection();
-      if (pending) {
-        setPendingDirection(null);
-        setTimeout(() => {
-          animateTo(pending);
-        }, 0);
-      } else if (isHeld()) {
-        props.onIsFastScrolling?.(true);
-        setIsFastScrolling(true);
-        playSound("select");
-        setTimeout(() => {
-          if (isHeld()) {
-            animateTo(direction);
-          } else {
-            setIsFastScrolling(false);
-            props.onIsFastScrolling?.(false);
-          }
-        }, 0);
-      } else {
-        setIsFastScrolling(false);
-        props.onIsFastScrolling?.(false);
-      }
-    });
-  };
-
-  const isActive = (index: number, currentAnimating: "left" | "right" | null) => {
-    if (currentAnimating === "right") {
-      return index === MIDDLE_SONG_INDEX + 1;
-    }
-    if (currentAnimating === "left") {
-      return index === MIDDLE_SONG_INDEX - 1;
-    }
-    return index === MIDDLE_SONG_INDEX;
-  };
-
-  const getSongTransform = (index: number, currentAnimating: "left" | "right" | null): string => {
-    const active = isActive(index, currentAnimating);
-
-    if (active) {
-      return "";
-    }
-
-    if (index === MIDDLE_SONG_INDEX) {
-      if (currentAnimating === "right") return "-translate-x-8";
-      if (currentAnimating === "left") return "translate-x-8";
-      return "";
-    }
-
-    if (index < MIDDLE_SONG_INDEX) {
-      return "-translate-x-8";
-    }
-
-    return "translate-x-8";
-  };
-
-  const scrollerClasses = createMemo(() => {
-    return {
-      "translate-x-0": animating() === null,
-      "translate-x-1/11 transition-transform duration-250": animating() === "left",
-      "-translate-x-1/11 transition-transform duration-250": animating() === "right",
-      "duration-150! ease-linear!": isFastScrolling() && !!animating(),
-      "duration-0! ease-linear!": props.animationsDisabled,
-    };
-  });
-
-  const songCardClasses = (index: number, currentAnimating: "left" | "right" | null) => ({
-    [getSongTransform(index, currentAnimating)]: true,
-    "hover:opacity-50 active:scale-90": isActive(index, currentAnimating),
-    "scale-90": isActive(index, currentAnimating) && isPressed(),
-    "duration-150! ease-linear!": isFastScrolling() && !!currentAnimating,
-    "duration-0! ease-linear!": props.animationsDisabled,
-  });
-
-  // Update the parent component with the song count
-  createEffect(() => {
-    const songCount = filteredAndSortedSongs().length;
-    props.onFilteredSongsChange?.(songCount);
-  });
-
-  return (
-    <div class="flex w-full flex-col items-center justify-center">
-      <div
-        class="flex w-11/7 transform-gpu ease-in-out will-change-transform"
-        classList={scrollerClasses()}
-        onTransitionEnd={onTransitionEnd}
-      >
-        <Key each={displayedSongs()} by={(item) => item.id}>
-          {(item, index) => {
-            const active = createMemo(() => isActive(index(), animating()));
-            const song = item().song;
-
-            return (
-              <button
-                type="button"
-                class="w-1/7 transform-gpu cursor-pointer p-2 transition-all duration-250 will-change-transform"
-                classList={songCardClasses(index(), animating())}
-                onTransitionEnd={(e) => e.stopPropagation()}
-                onClick={() => {
-                  if (animating()) return;
-
-                  if (index() === MIDDLE_SONG_INDEX) {
-                    props.onSelect?.(song);
-                  } else {
-                    animateTo(index() > MIDDLE_SONG_INDEX ? "right" : "left");
-                  }
-                }}
-              >
-                <SongCard
-                  song={song}
-                  active={active()}
-                  fastScrolling={isFastScrolling() && !!animating()}
-                  animationsDisabled={props.animationsDisabled}
-                />
-              </button>
-            );
-          }}
-        </Key>
-      </div>
-    </div>
-  );
-}
-
-interface SongCardProps {
-  song: LocalSong;
-  class?: string;
-  classList?: Record<string, boolean>;
-  active?: boolean;
-  fastScrolling?: boolean;
-  animationsDisabled?: boolean;
-}
-
-function SongCard(props: SongCardProps) {
-  return (
-    <div
-      class="relative aspect-square transform-gpu overflow-hidden rounded-lg shadow-md transition-transform duration-250 will-change-transform"
-      classList={{
-        [props.class || ""]: true,
-        "scale-130": props.active,
-        "duration-150! ease-linear!": props.fastScrolling,
-        "duration-0! ease-linear!": props.animationsDisabled,
-      }}
     >
-      <img
-        class="relative z-1 h-full w-full object-cover transition-opacity duration-250 will-change-opacity"
-        classList={{
-          "opacity-60": !props.active,
-          "opacity-100": props.active,
-          "duration-150! ease-linear!": props.fastScrolling,
-          "duration-0! ease-linear!": props.animationsDisabled,
-        }}
-        src={props.song.coverUrl ?? ""}
-        alt={props.song.title}
-      />
-      <div class="absolute inset-0 bg-black" />
-    </div>
-  );
-}
-
-interface SearchButtonProps {
-  searchQuery: string;
-  searchFilter: "all" | "artist" | "title" | "year" | "genre" | "language" | "edition" | "creator";
-  onClick: () => void;
-}
-
-function SearchButton(props: SearchButtonProps) {
-  const filterOptions: Array<{ value: "all" | "artist" | "title" | "year" | "genre" | "language" | "edition" | "creator"; label: string }> =
-    [
-      { value: "all", label: t("sing.filter.all") },
-      { value: "artist", label: t("sing.sort.artist") },
-      { value: "title", label: t("sing.sort.title") },
-      { value: "year", label: t("sing.sort.year") },
-      { value: "genre", label: t("sing.filter.genre") },
-      { value: "language", label: t("sing.filter.language") },
-      { value: "edition", label: t("sing.filter.edition") },
-      { value: "creator", label: t("sing.filter.creator") },
-    ];
-
-  const filterLabel = () => filterOptions.find((option) => option.value === props.searchFilter)?.label || t("sing.filter.all");
-
-  return (
-    <button
-      type="button"
-      class="flex w-40 items-center gap-1 rounded-full border-[0.12cqw] border-white px-1 py-0.5 text-sm transition-all hover:opacity-75 active:scale-95"
-      onClick={props.onClick}
-    >
-      <IconSearch class="flex-shrink-0" />
-      <div class="flex w-full min-w-0 items-center gap-2">
-        <span class="flex-grow truncate text-start">{props.searchQuery || t("sing.search")}</span>
-        <Show when={props.searchQuery}>
-          <span class="flex-shrink-0 rounded-full bg-white/20 px-1.5 py-0.4 text-xs">{filterLabel()}</span>
-        </Show>
-      </div>
-      <Show when={keyMode() === "keyboard"} fallback={<IconGamepadStart class="flex-shrink-0 text-xs" />}>
-        <IconF3Key class="flex-shrink-0 text-xs" />
-      </Show>
-    </button>
-  );
-}
-
-interface SearchPopupProps {
-  searchQuery: string;
-  searchFilter: "all" | "artist" | "title" | "year" | "genre" | "language" | "edition" | "creator";
-  onSearchQuery: (query: string) => void;
-  onSearchFilter: (filter: "all" | "artist" | "title" | "year" | "genre" | "language" | "edition" | "creator") => void;
-  onClose: () => void;
-}
-
-function SearchPopup(props: SearchPopupProps) {
-  let searchRef!: HTMLInputElement;
-  let popupRef!: HTMLDivElement;
-
-  createEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (popupRef && !popupRef.contains(event.target as Node)) {
-        props.onClose();
-      }
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-    onCleanup(() => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    });
-  });
-
-  const onInput = (e: InputEvent & { currentTarget: HTMLInputElement }) => {
-    props.onSearchQuery(e.currentTarget.value);
-  };
-
-  const filterOptions: Array<{ value: "all" | "artist" | "title" | "year" | "genre" | "language" | "edition" | "creator"; label: string }> =
-    [
-      { value: "all", label: t("sing.filter.all") },
-      { value: "artist", label: t("sing.sort.artist") },
-      { value: "title", label: t("sing.sort.title") },
-      { value: "year", label: t("sing.sort.year") },
-      { value: "genre", label: t("sing.filter.genre") },
-      { value: "language", label: t("sing.filter.language") },
-      { value: "edition", label: t("sing.filter.edition") },
-      { value: "creator", label: t("sing.filter.creator") },
-    ];
-
-  const moveFilter = (direction: "left" | "right") => {
-    const currentIndex = filterOptions.findIndex((option) => option.value === props.searchFilter);
-    const newIndex = (currentIndex + (direction === "left" ? -1 : 1) + filterOptions.length) % filterOptions.length;
-    const newOption = filterOptions[newIndex];
-    if (newOption) {
-      props.onSearchFilter(newOption.value);
-    }
-  };
-
-  useNavigation(() => ({
-    layer: 1,
-    onKeydown(event) {
-      if (event.action === "back" || event.action === "search") {
-        props.onClose();
-      } else if (event.action === "filter-left") {
-        moveFilter("left");
-      } else if (event.action === "filter-right") {
-        moveFilter("right");
-      }
-    },
-
-    onKeyup(event) {
-      if (event.origin === "keyboard") {
-        if (event.action === "confirm" && event.originalKey !== " ") {
-          props.onClose();
-        }
-      }
-    },
-  }));
-
-  onMount(() => {
-    searchRef.focus();
-  });
-
-  return (
-    <div class="absolute top-full left-0 z-20 mt-2" ref={popupRef}>
-      <Motion.div
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -10 }}
-        class="w-96 rounded-lg bg-slate-900 p-4 text-white shadow-xl"
-      >
-        <div class="space-y-3">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <Show when={keyMode() === "keyboard"} fallback={<IconGamepadLB class="text-sm" />}>
-                <IconF5Key class="text-sm" />
-              </Show>
-              <button
-                type="button"
-                class="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md bg-slate-800 transition-transform hover:opacity-75 active:scale-95"
-                onClick={() => moveFilter("left")}
-              >
-                <IconTriangleLeft class="text-xs" />
-              </button>
+      <Switch>
+        <Match when={songSelectStyle() === "grid"}>
+          <div class="relative flex h-full min-h-0 gap-8">
+            <div class="relative -ml-8 w-1/2">
+              <SongGrid
+                ref={gridRef}
+                items={songs()}
+                sort={sort()}
+                searchQuery={searchQuery()}
+                searchFieldScope={searchFieldScope()}
+                filters={filters()}
+                initialSong={currentSong() ?? undefined}
+                class="absolute inset-0"
+                onSelectedItemChange={handleCenteredItemChange}
+                onFilteredCountChange={setFilteredSongCount}
+                onConfirm={startRegular}
+              />
             </div>
-
-            <div class="flex justify-center">
-              <div class="rounded-md bg-slate-800 px-3 py-1">
-                <span class="font-medium text-sm text-white">
-                  {filterOptions.find((option) => option.value === props.searchFilter)?.label || t("sing.filter.all")}
-                </span>
+            <div class="flex w-1/2 flex-col">
+              <div class="flex h-1/3 items-center">
+                <div class="relative flex flex-col">
+                  <p class="text-xl">{currentSong()?.artist}</p>
+                  <div class="max-w-full">
+                    <span class="gradient-sing bg-linear-to-b bg-clip-text text-6xl font-bold text-transparent">
+                      {currentSong()?.title}
+                    </span>
+                  </div>
+                  <div class="absolute top-full flex items-center gap-2">
+                    <Show when={(currentSong()?.voices.length || 0) > 1}>
+                      <IconDuet />
+                    </Show>
+                    <Show when={currentSong() && !localStore.isSongPlayed(currentSong()!.hash)}>
+                      <span class="gradient-sing rounded-full bg-linear-to-b px-2.5 py-0.5 text-sm font-semibold text-white shadow-md">
+                        {t("sing.badge.new")}
+                      </span>
+                    </Show>
+                  </div>
+                </div>
+              </div>
+              <div class="mt-8 flex min-h-0 flex-1 gap-2">
+                <Show when={currentSong()}>{(song) => <DebouncedHighscoreList songHash={song().hash} />}</Show>
+                <Show when={isMedley()}>
+                  <MedleyList
+                    songs={medleyStore.songs()}
+                    onRemove={(index) => {
+                      medleyStore.removeAt(index);
+                      playSound("select");
+                    }}
+                    onStart={startMedley}
+                    useAlternativeNavigation
+                  />
+                </Show>
               </div>
             </div>
-
-            <div class="flex items-center gap-2">
-              <button
-                type="button"
-                class="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md bg-slate-800 transition-transform hover:opacity-75 active:scale-95"
-                onClick={() => moveFilter("right")}
-              >
-                <IconTriangleRight class="text-xs" />
-              </button>
-              <Show when={keyMode() === "keyboard"} fallback={<IconGamepadRB class="text-sm" />}>
-                <IconF6Key class="text-sm" />
-              </Show>
+          </div>
+        </Match>
+        <Match when={songSelectStyle() === "coverflow"}>
+          <div class="relative grid h-full grid-rows-[1fr_auto]">
+            <div class="flex grow items-center">
+              <div class="relative flex grow flex-col">
+                <p class="text-xl">{currentSong()?.artist}</p>
+                <div class="max-w-200">
+                  <span class="gradient-sing bg-linear-to-b bg-clip-text text-6xl font-bold text-transparent">
+                    {currentSong()?.title}
+                  </span>
+                </div>
+                <div class="absolute top-full flex items-center gap-2">
+                  <Show when={(currentSong()?.voices.length || 0) > 1}>
+                    <IconDuet />
+                  </Show>
+                  <Show when={currentSong() && !localStore.isSongPlayed(currentSong()!.hash)}>
+                    <span class="gradient-sing rounded-full bg-linear-to-b px-2.5 py-0.5 text-sm font-semibold text-white shadow-md">
+                      {t("sing.badge.new")}
+                    </span>
+                  </Show>
+                </div>
+              </div>
+              <div class="flex h-full gap-2">
+                <Show when={currentSong()}>{(song) => <DebouncedHighscoreList songHash={song().hash} />}</Show>
+                <Show when={isMedley()}>
+                  <MedleyList
+                    songs={medleyStore.songs()}
+                    onRemove={(index) => {
+                      medleyStore.removeAt(index);
+                      playSound("select");
+                    }}
+                    onStart={startMedley}
+                  />
+                </Show>
+              </div>
             </div>
+            <SongScroller
+              ref={scrollerRef}
+              items={songs()}
+              sort={sort()}
+              searchQuery={searchQuery()}
+              searchFieldScope={searchFieldScope()}
+              filters={filters()}
+              initialSong={currentSong() ?? undefined}
+              class="-mx-16 h-60 w-[calc(100%+8cqw)]"
+              onCenteredItemChange={handleCenteredItemChange}
+              onFilteredCountChange={setFilteredSongCount}
+              onConfirm={startRegular}
+            >
+              {(song) => <SongCard song={song} />}
+            </SongScroller>
           </div>
-
-          <input
-            value={props.searchQuery}
-            onInput={onInput}
-            ref={searchRef}
-            type="text"
-            placeholder={t("sing.search")}
-            class="focus:gradient-sing w-full rounded-md bg-slate-800 px-3 py-2 text-white placeholder-gray-400 transition-all focus:bg-gradient-to-r focus:outline-none"
-          />
-        </div>
-
-        <Show when={keyMode() === "gamepad"}>
-          <div class="mt-4 flex justify-center">
-            <VirtualKeyboard inputRef={searchRef} layer={1} onClose={props.onClose} />
-          </div>
-        </Show>
-      </Motion.div>
-    </div>
-  );
-}
-
-interface DebouncedHighscoreListProps {
-  songHash: string;
-}
-
-function DebouncedHighscoreList(props: DebouncedHighscoreListProps) {
-  const [highscores, setHighscores] = createSignal<Highscore[]>([]);
-
-  createEffect(
-    on(
-      () => props.songHash,
-      () => {
-        setHighscores([]);
-
-        const timeout = setTimeout(async () => {
-          if (!lobbyStore.lobby()) return;
-
-          const hash = props.songHash;
-          if (!hash) return;
-          const [error, data] = await safe(client.highscore.getHighscores.call({ hash }));
-          if (error) return;
-
-          setHighscores(data);
-        }, 1000);
-
-        onCleanup(() => {
-          clearTimeout(timeout);
-        });
-      }
-    )
-  );
-
-  return (
-    <div class="h-full transition-opacity duration-250" classList={{ "opacity-0": highscores().length === 0 }}>
-      <HighscoreList scores={highscores()} />
-    </div>
+        </Match>
+      </Switch>
+    </Layout>
   );
 }

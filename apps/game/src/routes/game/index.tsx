@@ -1,14 +1,19 @@
 import { createFileRoute, useNavigate } from "@tanstack/solid-router";
-import { createEffect, createSignal, onCleanup, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack } from "solid-js";
+
 import GameLayout from "~/components/game/game-layout";
-import Half from "~/components/game/half";
+import Lyrics from "~/components/game/lyrics";
 import PauseMenu from "~/components/game/pause-menu";
+import PlayerLane from "~/components/game/player-lane";
 import Progress from "~/components/game/progress";
+import OnlineSongPlayer from "~/components/online-song-player";
 import type { SongPlayerRef } from "~/components/song-player";
 import SongPlayer from "~/components/song-player";
 import { createMidiNoteListener, sendMidiNote } from "~/hooks/midi";
 import { useNavigation } from "~/hooks/navigation";
 import { createGame } from "~/lib/game/game";
+import { notify } from "~/lib/toast";
+import { isLocalSong, isUsdbSong } from "~/lib/ultrastar/song";
 import { roundStore, useRoundActions } from "~/stores/round";
 import { settingsStore } from "~/stores/settings";
 
@@ -23,9 +28,45 @@ function GameComponent() {
   const [hideIntro, setHideIntro] = createSignal(false);
   const roundActions = useRoundActions();
 
-  const { GameProvider, start, stop, pause, resume, playing, started, scores, skip } = createGame(() => ({
+  const roundSong = () => roundStore.settings()?.songs[0];
+  const isOnline = createMemo(() => {
+    const song = roundSong()?.song;
+    return song ? isUsdbSong(song) : false;
+  });
+
+  const localSong = createMemo(() => {
+    const song = roundSong()?.song;
+    return song && isLocalSong(song) ? song : null;
+  });
+
+  const usdbAudioYoutubeId = createMemo(() => {
+    const song = roundSong()?.song;
+    if (!song || !isUsdbSong(song)) return null;
+    return song.audioYoutubeId ?? song.videoYoutubeId ?? null;
+  });
+
+  const usdbVideoYoutubeId = createMemo(() => {
+    const song = roundSong()?.song;
+    if (!song || !isUsdbSong(song)) return null;
+    return song.videoYoutubeId ?? null;
+  });
+
+  const {
+    GameProvider,
+    start,
+    stop,
+    pause,
+    resume,
+    playing,
+    started,
+    scores,
+    skip,
+    setPreferInstrumental,
+    preferInstrumental,
+    resetScores,
+  } = createGame(() => ({
     songPlayerRef: songPlayerRef(),
-    song: roundStore.settings()?.song,
+    song: roundSong()?.song,
   }));
 
   const paused = () => !playing() && started();
@@ -50,13 +91,16 @@ function GameComponent() {
         pause();
       } else if (event.action === "skip") {
         skip();
+      } else if (event.action === "instrumental") {
+        setPreferInstrumental((value) => !value);
       }
     },
   }));
 
   createEffect(() => {
-    if (canPlayThrough()) {
-      start();
+    // TO-DO: check new condition !untracked(started) here
+    if (canPlayThrough() && !untrack(started)) {
+      untrack(() => start());
     }
   });
 
@@ -69,11 +113,31 @@ function GameComponent() {
   });
 
   onCleanup(async () => {
-    stop();
+    await stop();
   });
 
   const handleEnded = (submitScores: boolean) => {
-    roundActions.endRound(scores(), submitScores);
+    queueMicrotask(() => {
+      roundActions.endRound(scores(), submitScores);
+    });
+  };
+
+  const handleNext = () => {
+    queueMicrotask(() => {
+      // TO-DO: fix
+      roundActions.endRound(scores());
+    });
+  };
+
+  const handleExit = () => {
+    queueMicrotask(() => {
+      if (roundSong()?.mode === "medley") {
+        roundActions.endMedley(scores());
+      } else {
+        // TO-DO: fix
+        roundActions.endRound(scores());
+      }
+    });
   };
 
   const gradient = () => {
@@ -84,82 +148,169 @@ function GameComponent() {
   };
 
   const handleRestart = () => {
-    roundStore.setScores([]);
+    resetScores();
     navigate({ to: "/game/restart", replace: true });
   };
 
   const handleError = () => {
-    roundActions.returnRound();
+    notify({ message: "Failed to play song", intent: "error" });
+    roundActions.failRound();
   };
+
+  const players = createMemo(() => roundSong()?.players || []);
+  const playerCount = createMemo(() => players().length);
+
+  const voiceCount = createMemo(() => roundSong()?.song.voices.length || 1);
+
+  const topVoice = createMemo(() => players()[0]?.voice ?? 0);
+  const bottomVoice = createMemo(() => {
+    if (voiceCount() > 1) {
+      return topVoice() === 0 ? 1 : 0;
+    }
+    return topVoice();
+  });
+
+  const useQuadLayout = createMemo(() => playerCount() >= 3);
+  const topPlayerCount = createMemo(() => (useQuadLayout() ? 2 : 1));
+  const bottomPlayerCount = createMemo(() => (useQuadLayout() ? 2 : 1));
+
+  const topPlayers = createMemo(() => players().slice(0, topPlayerCount()));
+  const bottomPlayers = createMemo(() => {
+    const count = playerCount();
+    if (count === 3) {
+      return players().slice(topPlayerCount(), topPlayerCount() + 1);
+    }
+    return players().slice(topPlayerCount(), topPlayerCount() + bottomPlayerCount());
+  });
 
   return (
     <GameLayout>
       <GameProvider>
-        <div class="relative h-full w-full">
-          <div
-            class="relative z-1 h-full w-full"
-            classList={{
-              "pointer-events-none opacity-0": paused(),
-            }}
-          >
-            <div class="absolute inset-0">
-              <Show when={roundStore.settings()}>
-                {(settings) => (
-                  <SongPlayer
-                    volume={settingsStore.getVolume("game")}
-                    onCanPlayThrough={() => setCanPlayThrough(true)}
-                    ref={setSongPlayerRef}
-                    playing={playing()}
-                    class="h-full w-full"
-                    song={settings().song}
-                    onEnded={() => handleEnded(true)}
-                    onError={handleError}
-                  />
-                )}
-              </Show>
-            </div>
-            <div class="relative z-1 grid h-full flex-grow grid-rows-[1fr_1fr]">
-              <Show when={roundStore.settings()?.players[0]}>
-                <Half index={0} />
-              </Show>
-              <Show when={roundStore.settings()?.players[1]}>
-                <Half index={1} />
-              </Show>
-            </div>
-            <div class="absolute inset-0">
-              <Progress />
-            </div>
-          </div>
+        <Show when={roundSong()}>
+          {(roundSong) => (
+            <div class="relative h-full w-full">
+              <div
+                class="relative z-1 h-full w-full"
+                classList={{
+                  "pointer-events-none opacity-0": paused(),
+                }}
+              >
+                <div class="absolute inset-0">
+                  <Show
+                    when={isOnline()}
+                    fallback={
+                      <SongPlayer
+                        volume={settingsStore.getVolume("game")}
+                        onCanPlayThrough={() => setCanPlayThrough(true)}
+                        ref={setSongPlayerRef}
+                        playing={playing()}
+                        class="h-full w-full"
+                        song={localSong()}
+                        onEnded={handleEnded}
+                        onError={handleError}
+                        preferInstrumental={preferInstrumental()}
+                        mode="play"
+                        useFades={roundSong()?.length !== "full"}
+                      />
+                    }
+                  >
+                    <OnlineSongPlayer
+                      volume={settingsStore.getVolume("game")}
+                      onCanPlayThrough={() => setCanPlayThrough(true)}
+                      ref={setSongPlayerRef}
+                      playing={playing()}
+                      class="h-full w-full"
+                      audioYoutubeId={usdbAudioYoutubeId()}
+                      videoYoutubeId={usdbVideoYoutubeId()}
+                      onEnded={handleEnded}
+                      onError={handleError}
+                    />
+                  </Show>
+                </div>
 
-          <Show when={paused()}>
-            <PauseMenu
-              class="absolute inset-0"
-              onClose={resume}
-              onExit={() => handleEnded(false)}
-              onRestart={handleRestart}
-              gradient={gradient()}
-            />
-          </Show>
+                <div class="relative z-1 flex h-full grow flex-col">
+                  <Lyrics voiceIndex={topVoice()} position="top" />
 
-          <div
-            class="absolute inset-0 z-2 bg-black transition-opacity duration-1000"
-            classList={{
-              "pointer-events-none opacity-0": hideIntro(),
-            }}
-          >
-            <img
-              class="absolute inset-0 block h-full w-full scale-110 transform object-cover opacity-60 blur-xl"
-              src={roundStore.settings()?.song.coverUrl ?? roundStore.settings()?.song.backgroundUrl ?? ""}
-              alt=""
-            />
-            <div class="relative flex h-full w-full flex-col items-center justify-center gap-2">
-              <p class="text-6xl">{roundStore.settings()?.song.artist}</p>
-              <div class="px-8 text-center">
-                <span class="text-center font-bold text-8xl">{roundStore.settings()?.song.title}</span>
+                  <div class="flex grow flex-col" style={{ flex: topPlayerCount() }}>
+                    <For each={topPlayers()}>
+                      {(_, index) => (
+                        <>
+                          <PlayerLane index={index()} position="top" />
+                          <Show when={index() < topPlayerCount() - 1}>
+                            <div class="h-px bg-white/20" />
+                          </Show>
+                        </>
+                      )}
+                    </For>
+                  </div>
+
+                  <div class="relative z-10 h-10">
+                    <Progress />
+                  </div>
+
+                  <div class="flex grow flex-col" style={{ flex: useQuadLayout() ? 2 : 1 }}>
+                    <For each={bottomPlayers()}>
+                      {(_, index) => {
+                        const actualIndex = () => topPlayerCount() + index();
+                        return (
+                          <>
+                            <Show when={index() > 0}>
+                              <div class="h-px bg-white/20" />
+                            </Show>
+                            <PlayerLane index={actualIndex()} position="bottom" />
+                          </>
+                        );
+                      }}
+                    </For>
+                    <Show when={playerCount() === 3}>
+                      <div class="h-px bg-white/20" />
+                      <div class="flex-1" />
+                    </Show>
+                  </div>
+
+                  <Lyrics voiceIndex={bottomVoice()} position="bottom" />
+                </div>
+              </div>
+
+              <Show when={paused()}>
+                <PauseMenu
+                  class="absolute inset-0"
+                  onClose={resume}
+                  onExit={() => handleEnded(false)}
+                  onNext={handleNext}
+                  showNext={roundSong()?.mode === "medley" && (roundStore.settings()?.songs.length ?? 0) > 1}
+                  onRestart={handleRestart}
+                  gradient={gradient()}
+                />
+              </Show>
+
+              <div
+                class="absolute inset-0 z-2 bg-black transition-opacity duration-1000"
+                classList={{
+                  "pointer-events-none opacity-0": hideIntro(),
+                }}
+              >
+                <img
+                  class="absolute inset-0 block h-full w-full scale-110 transform object-cover opacity-60 blur-xl"
+                  src={(() => {
+                    const song = roundSong()?.song;
+                    if (!song) return "";
+                    if (isUsdbSong(song)) return song.coverUrl ?? "";
+                    if (isLocalSong(song)) return song.coverUrl ?? song.backgroundUrl ?? "";
+                    return "";
+                  })()}
+                  alt=""
+                />
+                <div class="relative flex h-full w-full flex-col items-center justify-center gap-2">
+                  <p class="text-6xl">{roundSong()?.song.artist}</p>
+                  <div class="px-8 text-center">
+                    <span class="text-center font-bold text-8xl">{roundSong()?.song.title}</span>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-        </div>
+          )}
+        </Show>
       </GameProvider>
     </GameLayout>
   );

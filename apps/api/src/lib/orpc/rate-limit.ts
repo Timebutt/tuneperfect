@@ -1,7 +1,8 @@
+import { init } from ".";
+import { env } from "../../config/env";
 import { tryCatch } from "../../utils/try-catch";
 import { logger } from "../logger";
 import { redis } from "../redis";
-import { init } from ".";
 
 export interface RateLimitMetadata {
   rateLimit: {
@@ -97,12 +98,35 @@ function applyRateLimitHeaders(
   context.resHeaders?.set("RateLimit-Policy", `${limit};w=${Math.ceil(windowMs / 1000)}`); // Policy with window size in seconds
 }
 
+export function getClientIp(headers?: Headers): string {
+  // Only trust forwarding headers when running behind a trusted reverse proxy.
+  // Otherwise a client could spoof them to bypass rate limiting.
+  if (!env.TRUSTED_PROXY_ENABLED) {
+    return "unknown";
+  }
+
+  // x-forwarded-for may be a list ("client, proxy1, proxy2"). The right-most
+  // entry is the one appended by our trusted reverse proxy and therefore the
+  // only one that cannot be spoofed by the client. Using the left-most entry
+  // would let attackers get a fresh rate-limit bucket per request by sending
+  // arbitrary X-Forwarded-For headers.
+  const forwardedFor = headers?.get("x-forwarded-for");
+  if (forwardedFor) {
+    const clientIp = forwardedFor.split(",").at(-1)?.trim();
+    if (clientIp) {
+      return clientIp;
+    }
+  }
+
+  return headers?.get("x-real-ip") ?? "unknown";
+}
+
 export const rateLimit = init.middleware(async ({ procedure, next, path, errors, context }) => {
   const rateLimitMeta = procedure["~orpc"].meta.rateLimit;
   const windowMs = rateLimitMeta?.windowMs;
   const limit = rateLimitMeta?.limit;
 
-  const ip = context.headers?.get("x-forwarded-for") ?? context.headers?.get("x-real-ip") ?? "unknown";
+  const ip = getClientIp(context.headers);
   const key = `rate-limit:${path.join(":")}:${ip}`;
 
   const [current, ttl] = await executeRateLimit(key, limit, windowMs);

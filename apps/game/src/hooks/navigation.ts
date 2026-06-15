@@ -2,8 +2,10 @@ import { createEventListener } from "@solid-primitives/event-listener";
 import { ReactiveMap } from "@solid-primitives/map";
 import { access, type MaybeAccessor } from "@solid-primitives/utils";
 import mitt from "mitt";
-import { createEffect, createMemo, createSignal, on, onCleanup } from "solid-js";
+import { createEffect, createMemo, createRoot, createSignal, on, onCleanup } from "solid-js";
+
 import { isPrintableKey } from "~/lib/utils/keyboard";
+
 import { createGamepad, type GamepadButton } from "./gamepad";
 
 export const [keyMode, setKeyMode] = createSignal<"gamepad" | "keyboard">("keyboard");
@@ -29,16 +31,26 @@ type NavigationEvent = {
     | "back"
     | "confirm"
     | "search"
+    | "filter"
     | "random"
     | "sort-left"
     | "sort-right"
     | "filter-left"
     | "filter-right"
+    | "zoom-in"
+    | "zoom-out"
+    | "add-to-medley"
+    | "remove-from-medley"
+    | "medley-up"
+    | "medley-down"
     | "joker-1"
     | "joker-2"
     | "skip"
     | "clear"
     | "fullscreen"
+    | "instrumental"
+    | "menu"
+    | "start-random-medley"
     | "unknown";
 };
 
@@ -51,16 +63,22 @@ const KEY_MAPPINGS = new Map<string, NavigationEvent["action"][]>([
   ["Enter", ["confirm"]],
   [" ", ["confirm"]],
   ["F3", ["search"]],
-  ["F4", ["random"]],
-  ["F5", ["sort-left", "filter-left"]],
-  ["F6", ["sort-right", "filter-right"]],
-  ["F1", ["joker-1"]],
-  ["F2", ["joker-2"]],
+  ["F4", ["filter"]],
+  ["F5", ["random"]],
+  ["F6", ["sort-left", "filter-left", "zoom-out"]],
+  ["F7", ["sort-right", "filter-right", "zoom-in"]],
+  ["F1", ["add-to-medley", "joker-1"]],
+  ["F2", ["remove-from-medley", "joker-2"]],
   ["s", ["skip"]],
   ["Backspace", ["clear"]],
   ["Meta+Enter", ["fullscreen"]],
   ["Alt+Enter", ["fullscreen"]],
   ["F11", ["fullscreen"]],
+  ["k", ["instrumental"]],
+  ["Tab", ["menu"]],
+  ["Shift+d", ["start-random-medley"]],
+  ["PageUp", ["medley-up"]],
+  ["PageDown", ["medley-down"]],
 ]);
 
 const GAMEPAD_MAPPINGS = new Map<GamepadButton, NavigationEvent["action"][]>([
@@ -70,11 +88,14 @@ const GAMEPAD_MAPPINGS = new Map<GamepadButton, NavigationEvent["action"][]>([
   ["DPAD_DOWN", ["down"]],
   ["B", ["back"]],
   ["A", ["confirm"]],
-  ["START", ["search"]],
-  ["Y", ["random"]],
-  ["LB", ["sort-left", "filter-left", "joker-1"]],
-  ["RB", ["sort-right", "filter-right", "joker-2"]],
-  ["X", ["skip", "clear"]],
+  ["START", ["menu"]],
+  ["SELECT", ["random"]],
+  ["Y", ["filter"]],
+  ["X", ["search", "skip", "clear"]],
+  ["LB", ["sort-left", "filter-left", "zoom-out", "joker-1", "instrumental"]],
+  ["RB", ["sort-right", "filter-right", "zoom-in", "joker-2"]],
+  ["LT", ["remove-from-medley"]],
+  ["RT", ["add-to-medley"]],
 ]);
 
 const getAxisAction = (button: GamepadButton, direction: number): NavigationEvent["action"] | undefined => {
@@ -83,6 +104,8 @@ const getAxisAction = (button: GamepadButton, direction: number): NavigationEven
       return direction > 0 ? "right" : "left";
     case "L_AXIS_Y":
       return direction > 0 ? "down" : "up";
+    case "R_AXIS_Y":
+      return direction > 0 ? "medley-down" : "medley-up";
     default:
       return undefined;
   }
@@ -120,8 +143,8 @@ const pressedGamepadButtons = new Map<string, { holdTimeout: number; repeatInter
 const HOLD_DELAY = 400;
 const REPEAT_DELAY = 50;
 
+
 createEventListener(document, 'contextmenu', (event) => {
-  console.log('sup');
 
   event.preventDefault();
 
@@ -133,153 +156,25 @@ createEventListener(document, 'contextmenu', (event) => {
       });
 });
 
-createEventListener(document, "keydown", (event) => {
-  if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
-    if (isPrintableKey(event.key) || ["Backspace", "Delete", "ArrowLeft", "ArrowRight"].includes(event.key)) {
-      return;
-    }
-  }
-
-  event.preventDefault();
-
-  if (event.repeat) return;
-
-  const { keyString, originalKey, modifiers } = getKeyInfo(event);
-  const actionsArray = KEY_MAPPINGS.get(keyString);
-
-  setKeyMode("keyboard");
-
-  if (actionsArray && actionsArray.length > 0) {
-    const existingTimers = pressedKeys.get(keyString);
-    if (existingTimers) {
-      clearTimeout(existingTimers.holdTimeout);
-      if (existingTimers.repeatInterval) {
-        clearInterval(existingTimers.repeatInterval);
+createRoot(() => {
+  createEventListener(document, "keydown", (event) => {
+    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
+      if (isPrintableKey(event.key) || ["Backspace", "Delete", "ArrowLeft", "ArrowRight"].includes(event.key)) {
+        return;
       }
     }
 
-    const holdTimeout = window.setTimeout(() => {
-      for (const action of actionsArray) {
-        emitter.emit("hold", {
-          origin: "keyboard",
-          originalKey,
-          modifiers: modifiers.length > 0 ? modifiers : undefined,
-          action,
-        });
-      }
+    event.preventDefault();
 
-      const repeatInterval = window.setInterval(() => {
-        for (const action of actionsArray) {
-          emitter.emit("repeat", {
-            origin: "keyboard",
-            originalKey,
-            modifiers: modifiers.length > 0 ? modifiers : undefined,
-            action,
-          });
-        }
-      }, REPEAT_DELAY);
+    if (event.repeat) return;
 
-      pressedKeys.set(keyString, { holdTimeout, repeatInterval });
-    }, HOLD_DELAY);
+    const { keyString, originalKey, modifiers } = getKeyInfo(event);
+    const actionsArray = KEY_MAPPINGS.get(keyString);
 
-    pressedKeys.set(keyString, { holdTimeout });
+    setKeyMode("keyboard");
 
-    for (const action of actionsArray) {
-      emitter.emit("keydown", {
-        origin: "keyboard",
-        originalKey,
-        modifiers: modifiers.length > 0 ? modifiers : undefined,
-        action,
-      });
-
-      console.log({
-        origin: "keyboard",
-        originalKey,
-        modifiers: modifiers.length > 0 ? modifiers : undefined,
-        action,
-      })
-    }
-  } else {
-    emitter.emit("keydown", {
-      origin: "keyboard",
-      originalKey,
-      modifiers: modifiers.length > 0 ? modifiers : undefined,
-      action: "unknown",
-    });
-
-    const holdTimeout = window.setTimeout(() => {
-      emitter.emit("hold", {
-        origin: "keyboard",
-        originalKey,
-        modifiers: modifiers.length > 0 ? modifiers : undefined,
-        action: "unknown",
-      });
-
-      const repeatInterval = window.setInterval(() => {
-        emitter.emit("repeat", {
-          origin: "keyboard",
-          originalKey,
-          modifiers: modifiers.length > 0 ? modifiers : undefined,
-          action: "unknown",
-        });
-      }, REPEAT_DELAY);
-
-      pressedKeys.set(keyString, { holdTimeout, repeatInterval });
-    }, HOLD_DELAY);
-
-    pressedKeys.set(keyString, { holdTimeout });
-  }
-});
-
-createEventListener(document, "keyup", (event) => {
-  if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
-    if (isPrintableKey(event.key) || ["Backspace", "Delete", "ArrowLeft", "ArrowRight"].includes(event.key)) {
-      return;
-    }
-  }
-
-  event.preventDefault();
-  if (event.repeat) return;
-
-  const { keyString, originalKey, modifiers } = getKeyInfo(event);
-
-  const timeouts = pressedKeys.get(keyString);
-  if (timeouts) {
-    clearTimeout(timeouts.holdTimeout);
-    if (timeouts.repeatInterval) {
-      clearInterval(timeouts.repeatInterval);
-    }
-    pressedKeys.delete(keyString);
-  }
-
-  const actionsArray = KEY_MAPPINGS.get(keyString);
-  if (actionsArray && actionsArray.length > 0) {
-    for (const action of actionsArray) {
-      emitter.emit("keyup", {
-        origin: "keyboard",
-        originalKey,
-        modifiers: modifiers.length > 0 ? modifiers : undefined,
-        action,
-      });
-    }
-  } else {
-    // Handle unknown key
-    emitter.emit("keyup", {
-      origin: "keyboard",
-      originalKey,
-      modifiers: modifiers.length > 0 ? modifiers : undefined,
-      action: "unknown",
-    });
-  }
-});
-
-createGamepad({
-  onButtonDown: (event) => {
-    setKeyMode("gamepad");
-    const actionsArray = GAMEPAD_MAPPINGS.get(event.button);
-
-    if (actionsArray && actionsArray.length > 0 && actionsArray[0] !== "unknown") {
-      const existingTimers = pressedGamepadButtons.get(event.button);
+    if (actionsArray && actionsArray.length > 0) {
+      const existingTimers = pressedKeys.get(keyString);
       if (existingTimers) {
         clearTimeout(existingTimers.holdTimeout);
         if (existingTimers.repeatInterval) {
@@ -289,103 +184,226 @@ createGamepad({
 
       const holdTimeout = window.setTimeout(() => {
         for (const action of actionsArray) {
-          if (action === "unknown") continue;
           emitter.emit("hold", {
-            origin: "gamepad",
-            originalKey: event.button,
+            origin: "keyboard",
+            originalKey,
+            modifiers: modifiers.length > 0 ? modifiers : undefined,
             action,
           });
         }
 
         const repeatInterval = window.setInterval(() => {
           for (const action of actionsArray) {
-            if (action === "unknown") continue;
             emitter.emit("repeat", {
-              origin: "gamepad",
-              originalKey: event.button,
+              origin: "keyboard",
+              originalKey,
+              modifiers: modifiers.length > 0 ? modifiers : undefined,
               action,
             });
           }
         }, REPEAT_DELAY);
-        pressedGamepadButtons.set(event.button, { holdTimeout, repeatInterval });
+
+        pressedKeys.set(keyString, { holdTimeout, repeatInterval });
       }, HOLD_DELAY);
 
-      pressedGamepadButtons.set(event.button, { holdTimeout });
+      pressedKeys.set(keyString, { holdTimeout });
 
       for (const action of actionsArray) {
-        if (action === "unknown") continue;
         emitter.emit("keydown", {
-          origin: "gamepad",
-          originalKey: event.button,
+          origin: "keyboard",
+          originalKey,
+          modifiers: modifiers.length > 0 ? modifiers : undefined,
           action,
         });
       }
-      return;
-    }
-
-    if (!event.direction) return;
-
-    const axisAction = getAxisAction(event.button, event.direction);
-    if (axisAction) {
+    } else {
       emitter.emit("keydown", {
-        origin: "gamepad",
-        originalKey: event.button,
-        action: axisAction,
+        origin: "keyboard",
+        originalKey,
+        modifiers: modifiers.length > 0 ? modifiers : undefined,
+        action: "unknown",
       });
 
       const holdTimeout = window.setTimeout(() => {
         emitter.emit("hold", {
-          origin: "gamepad",
-          originalKey: event.button,
-          action: axisAction,
+          origin: "keyboard",
+          originalKey,
+          modifiers: modifiers.length > 0 ? modifiers : undefined,
+          action: "unknown",
         });
 
         const repeatInterval = window.setInterval(() => {
           emitter.emit("repeat", {
-            origin: "gamepad",
-            originalKey: event.button,
-            action: axisAction,
+            origin: "keyboard",
+            originalKey,
+            modifiers: modifiers.length > 0 ? modifiers : undefined,
+            action: "unknown",
           });
         }, REPEAT_DELAY);
 
-        pressedGamepadButtons.set(event.button, { holdTimeout, repeatInterval });
+        pressedKeys.set(keyString, { holdTimeout, repeatInterval });
       }, HOLD_DELAY);
 
-      pressedGamepadButtons.set(event.button, { holdTimeout });
+      pressedKeys.set(keyString, { holdTimeout });
     }
-  },
-  onButtonUp: (event) => {
-    const timeouts = pressedGamepadButtons.get(event.button);
+  });
+
+  createEventListener(document, "keyup", (event) => {
+    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
+      if (isPrintableKey(event.key) || ["Backspace", "Delete", "ArrowLeft", "ArrowRight"].includes(event.key)) {
+        return;
+      }
+    }
+
+    event.preventDefault();
+    if (event.repeat) return;
+
+    const { keyString, originalKey, modifiers } = getKeyInfo(event);
+
+    const timeouts = pressedKeys.get(keyString);
     if (timeouts) {
       clearTimeout(timeouts.holdTimeout);
       if (timeouts.repeatInterval) {
         clearInterval(timeouts.repeatInterval);
       }
-      pressedGamepadButtons.delete(event.button);
+      pressedKeys.delete(keyString);
     }
 
-    const actionsArray = GAMEPAD_MAPPINGS.get(event.button);
-    if (actionsArray) {
+    const actionsArray = KEY_MAPPINGS.get(keyString);
+    if (actionsArray && actionsArray.length > 0) {
       for (const action of actionsArray) {
-        if (action === "unknown") continue;
         emitter.emit("keyup", {
-          origin: "gamepad",
-          originalKey: event.button,
+          origin: "keyboard",
+          originalKey,
+          modifiers: modifiers.length > 0 ? modifiers : undefined,
           action,
         });
       }
-      return;
-    }
-
-    const axisAction = getAxisAction(event.button, event.direction ?? 0);
-    if (axisAction) {
+    } else {
+      // Handle unknown key
       emitter.emit("keyup", {
-        origin: "gamepad",
-        originalKey: event.button,
-        action: axisAction,
+        origin: "keyboard",
+        originalKey,
+        modifiers: modifiers.length > 0 ? modifiers : undefined,
+        action: "unknown",
       });
     }
-  },
+  });
+
+  createGamepad({
+    onButtonDown: (event) => {
+      setKeyMode("gamepad");
+      const actionsArray = GAMEPAD_MAPPINGS.get(event.button);
+
+      if (actionsArray && actionsArray.length > 0 && actionsArray[0] !== "unknown") {
+        const existingTimers = pressedGamepadButtons.get(event.button);
+        if (existingTimers) {
+          clearTimeout(existingTimers.holdTimeout);
+          if (existingTimers.repeatInterval) {
+            clearInterval(existingTimers.repeatInterval);
+          }
+        }
+
+        const holdTimeout = window.setTimeout(() => {
+          for (const action of actionsArray) {
+            if (action === "unknown") continue;
+            emitter.emit("hold", {
+              origin: "gamepad",
+              originalKey: event.button,
+              action,
+            });
+          }
+
+          const repeatInterval = window.setInterval(() => {
+            for (const action of actionsArray) {
+              if (action === "unknown") continue;
+              emitter.emit("repeat", {
+                origin: "gamepad",
+                originalKey: event.button,
+                action,
+              });
+            }
+          }, REPEAT_DELAY);
+          pressedGamepadButtons.set(event.button, { holdTimeout, repeatInterval });
+        }, HOLD_DELAY);
+
+        pressedGamepadButtons.set(event.button, { holdTimeout });
+
+        for (const action of actionsArray) {
+          if (action === "unknown") continue;
+          emitter.emit("keydown", {
+            origin: "gamepad",
+            originalKey: event.button,
+            action,
+          });
+        }
+        return;
+      }
+
+      if (!event.direction) return;
+
+      const axisAction = getAxisAction(event.button, event.direction);
+      if (axisAction) {
+        emitter.emit("keydown", {
+          origin: "gamepad",
+          originalKey: event.button,
+          action: axisAction,
+        });
+
+        const holdTimeout = window.setTimeout(() => {
+          emitter.emit("hold", {
+            origin: "gamepad",
+            originalKey: event.button,
+            action: axisAction,
+          });
+
+          const repeatInterval = window.setInterval(() => {
+            emitter.emit("repeat", {
+              origin: "gamepad",
+              originalKey: event.button,
+              action: axisAction,
+            });
+          }, REPEAT_DELAY);
+
+          pressedGamepadButtons.set(event.button, { holdTimeout, repeatInterval });
+        }, HOLD_DELAY);
+
+        pressedGamepadButtons.set(event.button, { holdTimeout });
+      }
+    },
+    onButtonUp: (event) => {
+      const timeouts = pressedGamepadButtons.get(event.button);
+      if (timeouts) {
+        clearTimeout(timeouts.holdTimeout);
+        if (timeouts.repeatInterval) {
+          clearInterval(timeouts.repeatInterval);
+        }
+        pressedGamepadButtons.delete(event.button);
+      }
+
+      const actionsArray = GAMEPAD_MAPPINGS.get(event.button);
+      if (actionsArray) {
+        for (const action of actionsArray) {
+          if (action === "unknown") continue;
+          emitter.emit("keyup", {
+            origin: "gamepad",
+            originalKey: event.button,
+            action,
+          });
+        }
+        return;
+      }
+
+      const axisAction = getAxisAction(event.button, event.direction ?? 0);
+      if (axisAction) {
+        emitter.emit("keyup", {
+          origin: "gamepad",
+          originalKey: event.button,
+          action: axisAction,
+        });
+      }
+    },
+  });
 });
 
 const layerInstances = new ReactiveMap<number, number>();

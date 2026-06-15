@@ -1,8 +1,33 @@
 import type { Score } from "~/stores/round";
+
 import type { Note } from "../ultrastar/note";
 import type { Voice } from "../ultrastar/voice";
 
 export const MAX_POSSIBLE_SCORE = 10000;
+
+export type PhraseRating = "perfect" | "great" | "good" | "meh" | "boo";
+
+export function getPhraseRating(correct: number, total: number): PhraseRating | null {
+  if (total <= 0) {
+    return null;
+  }
+
+  const ratio = correct / total;
+
+  if (ratio >= 1) {
+    return "perfect";
+  }
+  if (ratio >= 0.85) {
+    return "great";
+  }
+  if (ratio >= 0.6) {
+    return "good";
+  }
+  if (ratio >= 0.3) {
+    return "meh";
+  }
+  return "boo";
+}
 
 export function getRelativeScore(score: Score, maxScore: Score) {
   const maxScoreTotal = maxScore.normal + maxScore.golden + maxScore.bonus;

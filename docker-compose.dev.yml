@@ -19,9 +19,30 @@ services:
       - 8025:8025
     volumes:
       - .tmp/mailpit:/data
+
   redis:
     image: redis:latest
     ports:
       - 6379:6379
     volumes:
       - .tmp/redis:/data
+
+  coturn:
+    image: coturn/coturn:4
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+      - "5349:5349/tcp"
+      - "40000-40048:40000-40048/udp"
+    command:
+      - --listening-port=3478
+      - --tls-listening-port=5349
+      - --realm=tuneperfect.localhost
+      - --server-name=tuneperfect.localhost
+      - --user=tuneperfect:tuneperfect
+      - --min-port=40000
+      - --max-port=40048
+      - --no-cli
+      - --no-multicast-peers
+      - --verbose
+      - --log-file=stdout

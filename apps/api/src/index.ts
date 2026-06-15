@@ -4,17 +4,33 @@ import type { RouterClient } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
 import { CORSPlugin, ResponseHeadersPlugin, StrictGetMethodPlugin } from "@orpc/server/plugins";
 import { experimental_ValibotToJsonSchemaConverter } from "@orpc/valibot";
+
 import { authRouter } from "./auth/router";
 import { clubRouter } from "./club/router";
 import { env } from "./config/env";
 import { highscoreRouter } from "./highscore/router";
+import { runMigrations } from "./lib/db";
 import { setupJobs } from "./lib/jobs";
 import { logger } from "./lib/logger";
 import { CookiesPlugin } from "./lib/orpc/cookies";
 import { CsrfProtectionPlugin } from "./lib/orpc/csrf-protection";
+import { captureException, posthog } from "./lib/posthog";
+import { connectRedis, redis } from "./lib/redis";
 import { lobbyRouter } from "./lobby/router";
+import { signalingRouter } from "./signaling/router";
 import { updateRouter } from "./update/router";
 import { userRouter } from "./user/router";
+import { webrtcRouter } from "./webrtc/router";
+
+process.on("unhandledRejection", (reason) => {
+  logger.error(reason, "Unhandled promise rejection");
+  captureException(reason, undefined, { kind: "unhandledRejection" });
+});
+
+process.on("uncaughtException", (error) => {
+  logger.error(error, "Uncaught exception");
+  captureException(error, undefined, { kind: "uncaughtException" });
+});
 
 const router = {
   auth: authRouter,
@@ -22,9 +38,12 @@ const router = {
   lobby: lobbyRouter,
   highscore: highscoreRouter,
   update: updateRouter,
-  club: clubRouter,
+  signaling: signalingRouter,
+  webrtc: webrtcRouter,
 };
 
+await runMigrations();
+await connectRedis();
 setupJobs();
 
 const allowedOrigins = [env.APP_URL, "http://localhost:1420", "tauri://localhost", "http://tauri.localhost"];
@@ -36,7 +55,8 @@ const plugins = [
         return origin;
       }
 
-      return allowedOrigins[0];
+      // Unknown origins get no Access-Control-Allow-Origin header at all.
+      return null;
     },
     credentials: true,
     allowHeaders: ["Content-Type", "Authorization"],
@@ -108,5 +128,25 @@ const server = Bun.serve({
 });
 
 logger.info(`Server is running on ${server.url}`);
+
+let shuttingDown = false;
+const shutdown = async () => {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+
+  logger.info("Shutting down gracefully...");
+
+  // Stop accepting new connections and drain in-flight requests.
+  await server.stop();
+
+  await Promise.allSettled([posthog?.shutdown(), redis.quit()]);
+
+  process.exit(0);
+};
+
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
 
 export type Client = RouterClient<typeof router>;

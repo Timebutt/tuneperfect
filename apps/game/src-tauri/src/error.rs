@@ -21,6 +21,12 @@ pub enum AppError {
 
     #[error("ultrastar error: {0}")]
     UltrastarError(String),
+
+    #[error("webrtc error: {0}")]
+    WebRTCError(String),
+
+    #[error("usdb error: {0}")]
+    UsdbError(String),
 }
 
 macro_rules! impl_from_errors {
@@ -38,10 +44,5 @@ macro_rules! impl_from_errors {
 impl_from_errors!(
     (std::io::Error, IoError),
     (lofty::error::LoftyError, LoftyError),
-    (cpal::StreamError, CpalError),
-    (cpal::DefaultStreamConfigError, CpalError),
-    (cpal::DevicesError, CpalError),
-    (cpal::DeviceNameError, CpalError),
-    (cpal::BuildStreamError, CpalError),
-    (cpal::PlayStreamError, CpalError)
+    (cpal::Error, CpalError)
 );

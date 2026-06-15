@@ -1,0 +1,26 @@
+{
+  "name": "@tuneperfect/webrtc",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./orpc": "./src/orpc/index.ts",
+    "./orpc/client": "./src/orpc/rpc-link.ts",
+    "./orpc/server": "./src/orpc/rpc-handler.ts",
+    "./utils": "./src/utils/index.ts",
+    "./contracts": "./src/contracts/index.ts",
+    "./contracts/game": "./src/contracts/game.ts",
+    "./contracts/app": "./src/contracts/app.ts"
+  },
+  "dependencies": {
+    "@orpc/client": "^1.14.4",
+    "@orpc/contract": "^1.14.4",
+    "@orpc/server": "^1.14.4",
+    "@orpc/shared": "^1.14.4",
+    "@orpc/standard-server": "^1.14.4",
+    "@orpc/standard-server-peer": "^1.14.4",
+    "valibot": "^1.4.1"
+  },
+  "peerDependencies": {
+    "typescript": "^6.0.0"
+  }
+}

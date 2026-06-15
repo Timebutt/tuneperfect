@@ -1,6 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/solid-query";
 import { createFileRoute } from "@tanstack/solid-router";
-import { createMemo, createSignal, For, onCleanup, onMount } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+
 import HighscoreList from "~/components/highscore-list";
 import KeyHints from "~/components/key-hints";
 import Layout from "~/components/layout";
@@ -39,34 +40,62 @@ interface PlayerScoreData {
 }
 
 function ScoreComponent() {
-  const highscoresQuery = useQuery(() => highscoreQueryOptions(roundStore.settings()?.song?.hash ?? ""));
+  const results = () => roundStore.results();
+  const shouldTrackHighscore = () => {
+    const res = results();
+    return res.length === 1 && res[0]?.song.mode === "single" && res[0]?.song.length === "full";
+  };
+
+  const maxPossibleScore = () => results().length * MAX_POSSIBLE_SCORE;
+
+  const highscoresQuery = useQuery(() => {
+    const hash = shouldTrackHighscore() ? results()[0]?.song.song.hash : undefined;
+    const options = highscoreQueryOptions(hash ?? "", settingsStore.general().difficulty);
+    return {
+      ...options,
+      enabled: !!hash,
+    };
+  });
+
   const [showHighscores, setShowHighscores] = createSignal(false);
   const roundActions = useRoundActions();
 
   const scoreData = createMemo<PlayerScoreData[]>(() => {
-    const players = roundStore.settings()?.players || [];
+    const currentResults = results();
+    const firstResult = currentResults[0];
+    if (!firstResult) return [];
+
+    // We assume the players from the first song are the players for the session
+    const players = firstResult.song.players;
     const result: PlayerScoreData[] = [];
 
     for (const [index, player] of players.entries()) {
-      const voiceIndex = roundStore.settings()?.voices[index];
-      if (voiceIndex === undefined) continue;
+      if (!player) continue;
 
-      const voice = roundStore.settings()?.song?.voices[voiceIndex];
+      const totalScore: Score = { normal: 0, golden: 0, bonus: 0 };
 
-      if (!voice || !player) continue;
+      for (const res of currentResults) {
+        const voiceIndex = res.song.players[index]?.voice;
+        if (voiceIndex === undefined) continue;
 
-      const maxScore = getMaxScore(voice);
-      const absoluteScore = roundStore.scores()[index] ?? { normal: 0, golden: 0, bonus: 0 };
+        const voice = res.song.song.voices[voiceIndex];
+        if (!voice) continue;
 
-      const relativeScore = getRelativeScore(absoluteScore, maxScore);
+        const maxScore = getMaxScore(voice);
+        const absoluteScore = res.scores[index] ?? { normal: 0, golden: 0, bonus: 0 };
+        const relativeScore = getRelativeScore(absoluteScore, maxScore);
 
-      const micColor = settingsStore.microphones()[index]?.color;
-      if (!micColor) continue;
+        totalScore.normal += relativeScore.normal;
+        totalScore.golden += relativeScore.golden;
+        totalScore.bonus += relativeScore.bonus;
+      }
+
+      const micColor = player.microphone.color;
 
       result.push({
-        player,
-        score: relativeScore,
-        totalScore: Math.floor(relativeScore.normal + relativeScore.golden + relativeScore.bonus),
+        player: player.player,
+        score: totalScore,
+        totalScore: Math.floor(totalScore.normal + totalScore.golden + totalScore.bonus),
         micColor,
         position: index + 1,
       });
@@ -77,8 +106,10 @@ function ScoreComponent() {
 
   const updateHighscoresMutation = useMutation(() => ({
     mutationFn: async () => {
+      if (!shouldTrackHighscore()) return;
+
       const scores = scoreData();
-      const songHash = roundStore.settings()?.song?.hash;
+      const songHash = results()[0]?.song.song.hash;
 
       if (!songHash) return;
 
@@ -88,7 +119,7 @@ function ScoreComponent() {
         if (score.totalScore <= 0) continue;
 
         if (isLocalUser(score.player)) {
-          localStore.addScore(score.player.id, songHash, score.totalScore);
+          localStore.addScore(score.player.id, songHash, settingsStore.general().difficulty, score.totalScore);
           continue;
         }
 
@@ -99,6 +130,7 @@ function ScoreComponent() {
           hash: songHash,
           userId: score.player.id.toString(),
           score: score.totalScore,
+          difficulty: settingsStore.general().difficulty,
         });
       }
     },
@@ -127,6 +159,10 @@ function ScoreComponent() {
   });
 
   onMount(() => {
+    for (const result of results()) {
+      localStore.markSongPlayed(result.song.song.hash);
+    }
+
     updateHighscoresMutation.mutate();
 
     const totalAnimationTime = animatedStages().length * ANIMATION_DELAY;
@@ -137,58 +173,51 @@ function ScoreComponent() {
   });
 
   const highscores = () => {
-    const songHash = roundStore.settings()?.song?.hash;
+    if (!shouldTrackHighscore()) return [];
+    const songHash = results()[0]?.song.song.hash;
     if (!songHash) return [];
 
-    const highscores: { user: User; score: number }[] = [...(highscoresQuery.data || [])];
+    const allScores: { user: User; score: number }[] = [];
 
-    // Add local scores
-    const localScores = localStore.getScoresForSong(songHash);
-    for (const localScore of localScores) {
-      highscores.push(localScore);
-    }
+    allScores.push(...(highscoresQuery.data || []));
 
-    // Add current session scores
+    const localScores = localStore.getScoresForSong(songHash, settingsStore.general().difficulty);
+    allScores.push(...localScores);
+
     const scores = scoreData();
-
     for (const score of scores) {
       if (isGuestUser(score.player)) continue;
       if (score.totalScore <= 0) continue;
 
-      const existingHighscoreIndex = highscores.findIndex((highscore) => highscore.user.id === score.player.id);
-      const existingHighscore = highscores[existingHighscoreIndex];
-
-      if (!existingHighscore) {
-        highscores.push({
-          user: score.player,
-          score: score.totalScore,
-        });
-        continue;
-      }
-
-      if (score.totalScore > existingHighscore.score) {
-        highscores[existingHighscoreIndex] = {
-          user: score.player,
-          score: score.totalScore,
-        };
-      }
+      allScores.push({
+        user: score.player,
+        score: score.totalScore,
+      });
     }
 
-    return highscores.toSorted((a, b) => b.score - a.score);
+    return allScores;
   };
 
   return (
     <Layout intent="secondary" header={<TitleBar title={t("score.title")} />} footer={<KeyHints hints={["confirm"]} />}>
       <div class="flex h-full flex-col gap-6">
-        <div class="flex min-h-0 flex-grow">
-          <div class="grid h-full w-full grid-cols-[2fr_3fr]">
-            <div
-              class="flex h-full min-h-0 items-center justify-center transition-opacity duration-500"
-              classList={{ "opacity-0": !showHighscores() }}
-            >
-              <HighscoreList scores={highscores()} class="h-full w-100 max-w-full" />
-            </div>
-            <div class="flex flex-grow flex-col items-center justify-center gap-4">
+        <div class="flex min-h-0 grow">
+          <div
+            class="grid h-full w-full"
+            classList={{
+              "grid-cols-[2fr_3fr]": shouldTrackHighscore(),
+              "grid-cols-1": !shouldTrackHighscore(),
+            }}
+          >
+            <Show when={shouldTrackHighscore()}>
+              <div
+                class="flex h-full min-h-0 items-center justify-center transition-opacity duration-500"
+                classList={{ "opacity-0": !showHighscores() }}
+              >
+                <HighscoreList scores={highscores()} class="h-full w-100 max-w-full" />
+              </div>
+            </Show>
+            <div class="flex grow flex-col items-center justify-center gap-2">
               <For each={scoreData()}>
                 {(data) => (
                   <ScoreCard
@@ -197,6 +226,8 @@ function ScoreComponent() {
                     player={data.player}
                     micColor={data.micColor}
                     position={data.position}
+                    maxPossibleScore={maxPossibleScore()}
+                    playerCount={scoreData().length}
                   />
                 )}
               </For>
@@ -204,7 +235,7 @@ function ScoreComponent() {
           </div>
         </div>
 
-        <div class="flex flex-shrink-0">
+        <div class="flex shrink-0">
           <Button
             loading={updateHighscoresMutation.isPending}
             selected
@@ -226,10 +257,12 @@ interface ScoreCardProps {
   micColor: string;
   position: number;
   animatedStages: ScoreCategory[];
+  maxPossibleScore: number;
+  playerCount: number;
 }
 
 function ScoreCard(props: ScoreCardProps) {
-  const getPercentage = (value: number) => (value / MAX_POSSIBLE_SCORE) * 100;
+  const getPercentage = (value: number) => (value / props.maxPossibleScore) * 100;
 
   const [animatedScores, setAnimatedScores] = createSignal<Score>({
     normal: 0,
@@ -252,7 +285,7 @@ function ScoreCard(props: ScoreCardProps) {
     startValue: number,
     endValue: number,
     setValue: (value: number) => void,
-    duration: number
+    duration: number,
   ): ReturnType<typeof setInterval> => {
     const stepValue = (endValue - startValue) / ANIMATION_STEPS;
     const stepDuration = duration / ANIMATION_STEPS;
@@ -271,7 +304,12 @@ function ScoreCard(props: ScoreCardProps) {
     return interval;
   };
 
-  const animatePercentage = (startValue: number, endValue: number, setValue: (value: number) => void, duration: number): (() => void) => {
+  const animatePercentage = (
+    startValue: number,
+    endValue: number,
+    setValue: (value: number) => void,
+    duration: number,
+  ): (() => void) => {
     const startTime = performance.now();
     let animationFrame: number;
 
@@ -320,14 +358,19 @@ function ScoreCard(props: ScoreCardProps) {
         const targetPercentage = getPercentage(scoreValue);
 
         // Animate the score numbers (slower, stepped)
-        animateCounter(0, scoreValue, (value) => setAnimatedScores((prev) => ({ ...prev, [category]: value })), ANIMATION_DURATION);
+        animateCounter(
+          0,
+          scoreValue,
+          (value) => setAnimatedScores((prev) => ({ ...prev, [category]: value })),
+          ANIMATION_DURATION,
+        );
 
         // Animate the bar percentages (smooth, requestAnimationFrame)
         const cleanup = animatePercentage(
           0,
           targetPercentage,
           (value) => setAnimatedPercentages((prev) => ({ ...prev, [category]: value })),
-          ANIMATION_DURATION
+          ANIMATION_DURATION,
         );
 
         cleanupFunctions.push(cleanup);
@@ -340,31 +383,89 @@ function ScoreCard(props: ScoreCardProps) {
     });
   });
 
+  const isCompact = () => props.playerCount > 2;
+
   return (
     <div
-      class="flex w-140 flex-col gap-4 rounded-xl p-6 shadow-xl transition-all"
+      class="flex w-140 rounded-xl shadow-xl transition-all"
+      classList={{
+        "flex-col gap-4 p-6": !isCompact(),
+        "flex-row gap-3 p-4": isCompact(),
+      }}
       style={{
         background: `linear-gradient(90deg, ${getColorVar(props.micColor, 600)}, ${getColorVar(props.micColor, 500)})`,
       }}
     >
-      <div class="flex w-full items-center justify-between">
-        <div class="flex items-center gap-3">
-          <Avatar user={props.player} />
-          <div class="font-bold text-lg text-white">{props.player.username}</div>
+      <div
+        class="flex flex-col"
+        classList={{
+          "flex-1 gap-2": isCompact(),
+          "gap-4": !isCompact(),
+        }}
+      >
+        <div class="flex w-full items-center justify-between">
+          <div class="flex items-center gap-3">
+            <Avatar user={props.player} class={isCompact() ? "h-8 w-8" : ""} fallbackClass="bg-white/20" />
+            <div
+              class="font-bold text-white"
+              classList={{
+                "text-base": isCompact(),
+                "text-lg": !isCompact(),
+              }}
+            >
+              {props.player.username}
+            </div>
+          </div>
+          <div
+            class="font-bold text-white"
+            classList={{
+              "text-2xl": isCompact(),
+              "text-3xl": !isCompact(),
+            }}
+          >
+            {animatedTotalScore().toLocaleString("en-US", { maximumFractionDigits: 0 })}
+          </div>
         </div>
-        <div class="font-bold text-3xl text-white">{animatedTotalScore().toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
+
+        <div
+          class="w-full overflow-hidden rounded-lg bg-black/20"
+          classList={{
+            "h-6": isCompact(),
+            "h-10": !isCompact(),
+          }}
+        >
+          <div class="flex h-full">
+            <ScoreBar percentage={animatedPercentages().normal} color={getColorVar(props.micColor, 400)} />
+            <ScoreBar percentage={animatedPercentages().golden} color={getColorVar(props.micColor, 300)} />
+            <ScoreBar percentage={animatedPercentages().bonus} color={getColorVar(props.micColor, 50)} />
+          </div>
+        </div>
       </div>
 
-      <div class="flex h-10 w-full overflow-hidden rounded-lg bg-black/20">
-        <ScoreBar percentage={animatedPercentages().normal} color={getColorVar(props.micColor, 400)} />
-        <ScoreBar percentage={animatedPercentages().golden} color={getColorVar(props.micColor, 300)} />
-        <ScoreBar percentage={animatedPercentages().bonus} color={getColorVar(props.micColor, 50)} />
-      </div>
-
-      <div class="grid grid-cols-3 gap-3">
-        <ScoreDetail label={t("score.normal")} value={animatedScores().normal} color={getColorVar(props.micColor, 400)} />
-        <ScoreDetail label={t("score.golden")} value={animatedScores().golden} color={getColorVar(props.micColor, 300)} />
-        <ScoreDetail label={t("score.bonus")} value={animatedScores().bonus} color={getColorVar(props.micColor, 50)} />
+      <div
+        classList={{
+          "grid grid-cols-1 gap-1": isCompact(),
+          "grid grid-cols-3 gap-3": !isCompact(),
+        }}
+      >
+        <ScoreDetail
+          label={t("score.normal")}
+          value={animatedScores().normal}
+          color={getColorVar(props.micColor, 400)}
+          compact={isCompact()}
+        />
+        <ScoreDetail
+          label={t("score.golden")}
+          value={animatedScores().golden}
+          color={getColorVar(props.micColor, 300)}
+          compact={isCompact()}
+        />
+        <ScoreDetail
+          label={t("score.bonus")}
+          value={animatedScores().bonus}
+          color={getColorVar(props.micColor, 50)}
+          compact={isCompact()}
+        />
       </div>
     </div>
   );
@@ -373,7 +474,7 @@ function ScoreCard(props: ScoreCardProps) {
 function ScoreBar(props: { percentage: number; color: string }) {
   return (
     <div
-      class="flex h-full items-center justify-center font-medium text-white/90 text-xs"
+      class="flex h-full items-center justify-center text-xs font-medium text-white/90"
       style={{
         width: `${props.percentage}%`,
         "background-color": props.color,
@@ -382,13 +483,39 @@ function ScoreBar(props: { percentage: number; color: string }) {
   );
 }
 
-function ScoreDetail(props: { label: string; value: number; color: string }) {
+function ScoreDetail(props: { label: string; value: number; color: string; compact?: boolean }) {
   return (
-    <div class="flex items-center gap-2 rounded-md bg-black/10 px-3 py-1.5">
-      <div class="h-4 w-4 rounded-sm" style={{ "background-color": props.color }} />
-      <div class="flex flex-col">
-        <span class="text-white/70 text-xs">{props.label}</span>
-        <span class="font-medium text-sm text-white">{props.value.toLocaleString("en-US", { maximumFractionDigits: 0 })}</span>
+    <div
+      class="flex items-center gap-2 rounded-md bg-black/10"
+      classList={{
+        "px-2 py-1": props.compact,
+        "px-3 py-1.5": !props.compact,
+      }}
+    >
+      <div
+        class="rounded-sm"
+        classList={{
+          "h-3 w-3": props.compact,
+          "h-4 w-4": !props.compact,
+        }}
+        style={{ "background-color": props.color }}
+      />
+      <div
+        classList={{
+          "flex min-w-24 flex-row items-center justify-between": props.compact,
+          "flex flex-col": !props.compact,
+        }}
+      >
+        <span class="text-xs text-white/70">{props.label}</span>
+        <span
+          class="font-medium text-white tabular-nums"
+          classList={{
+            "text-xs": props.compact,
+            "text-sm": !props.compact,
+          }}
+        >
+          {props.value.toLocaleString("en-US", { maximumFractionDigits: 0 })}
+        </span>
       </div>
     </div>
   );

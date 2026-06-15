@@ -3,11 +3,14 @@ mod commands;
 mod error;
 mod media_server;
 mod ultrastar;
+mod usdb;
+mod webrtc;
 
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex, RwLock},
 };
+use tokio::sync::Mutex as TokioMutex;
 
 use audio::{processor::Processor, recorder::Recorder};
 use commands::*;
@@ -17,10 +20,12 @@ use tauri::Manager;
 use tauri_plugin_cli::CliExt;
 use tauri_plugin_fs::FsExt;
 use tauri_specta::{collect_commands, collect_events, Builder};
+use usdb::client::UsdbClient;
 
 pub struct AppState {
     recorder: RwLock<Option<Recorder>>,
     processors: RwLock<HashMap<usize, Arc<Mutex<Processor>>>>,
+    usdb_client: TokioMutex<Option<UsdbClient>>,
 }
 
 impl Default for AppState {
@@ -28,6 +33,7 @@ impl Default for AppState {
         Self {
             recorder: RwLock::new(None),
             processors: RwLock::new(HashMap::new()),
+            usdb_client: TokioMutex::new(None),
         }
     }
 }
@@ -39,13 +45,31 @@ pub fn run() {
             microphones::get_microphones,
             pitch::start_recording,
             pitch::stop_recording,
-            pitch::get_pitch,
+            pitch::get_pitches,
+            pitch::get_audio_levels,
             media_server::get_media_server_base_url,
             songs::parse_songs_from_paths,
+            webrtc::commands::webrtc_create_answer,
+            webrtc::commands::webrtc_add_ice_candidate,
+            webrtc::commands::webrtc_send_message,
+            webrtc::commands::webrtc_close_connection,
+            webrtc::commands::webrtc_close_all,
+            usdb::commands::usdb_login,
+            usdb::commands::usdb_logout,
+            usdb::commands::usdb_is_logged_in,
+            usdb::commands::usdb_fetch_catalog,
+            usdb::commands::usdb_get_song_preview,
+            usdb::commands::usdb_get_song,
         ])
         .events(collect_events![
             songs::ProgressEvent,
-            songs::StartParsingEvent
+            songs::StartParsingEvent,
+            usdb::commands::UsdbSyncProgressEvent,
+            webrtc::host::IceCandidateEvent,
+            webrtc::host::ConnectionStateEvent,
+            webrtc::host::ChannelOpenEvent,
+            webrtc::host::ChannelCloseEvent,
+            webrtc::host::ChannelMessageEvent,
         ]);
 
     #[cfg(debug_assertions)]
@@ -102,6 +126,7 @@ pub fn run() {
             }
 
             app.manage(AppState::default());
+            app.manage(webrtc::host::create_shared_host());
             builder.mount_events(app);
 
             Ok(())

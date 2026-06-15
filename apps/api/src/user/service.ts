@@ -1,5 +1,6 @@
 import { eq, sql } from "drizzle-orm";
 import sharp from "sharp";
+
 import { authService } from "../auth/service";
 import { env } from "../config/env";
 import { db } from "../lib/db";
@@ -18,6 +19,14 @@ export class UserService {
     });
   }
 
+  async getUserByEmailWithPassword(email: string) {
+    return await db.query.users.findFirst({
+      where: {
+        RAW: (table) => sql`lower(${table.email}) = ${email.toLowerCase()}`,
+      },
+    });
+  }
+
   async getUserById(id: string) {
     return await db.query.users.findFirst({
       where: {
@@ -25,6 +34,14 @@ export class UserService {
       },
       columns: {
         password: false,
+      },
+    });
+  }
+
+  async getUserByIdWithPassword(id: string) {
+    return await db.query.users.findFirst({
+      where: {
+        id,
       },
     });
   }

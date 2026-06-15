@@ -1,11 +1,12 @@
 import { ReactiveMap } from "@solid-primitives/map";
-import { type Accessor, createEffect, createMemo, createSignal, type JSX } from "solid-js";
-import { commands } from "~/bindings";
+import { type Accessor, createEffect, createMemo, createSignal, type JSX, on } from "solid-js";
+
 import { roundStore } from "~/stores/round";
 import { settingsStore } from "~/stores/settings";
+
 import { msToBeatWithoutGap } from "../ultrastar/bpm";
 import type { Note } from "../ultrastar/note";
-import { getMaxScore, getNoteScore } from "../utils/score";
+import { getMaxScore, getNoteScore, getPhraseRating, type PhraseRating } from "../utils/score";
 import { useGame } from "./game";
 import { PitchProcessor } from "./pitch";
 import { type PlayerContextValue, PlayerProvider } from "./player-context";
@@ -17,16 +18,17 @@ interface CreatePlayerOptions {
 export { usePlayer } from "./player-context";
 
 export function createPlayer(options: Accessor<CreatePlayerOptions>) {
-  const pitchProcessor = new PitchProcessor();
+  const pitchProcessor = new PitchProcessor(settingsStore.general().difficulty);
   const game = useGame();
+  const roundSong = () => roundStore.settings()?.songs[0];
 
   const voice = createMemo(() => {
-    const voiceIndex = roundStore.settings()?.voices[options().index];
+    const voiceIndex = roundSong()?.players[options().index]?.voice;
     if (voiceIndex === undefined) {
       return undefined;
     }
 
-    return game.song()?.voices[voiceIndex];
+    return roundSong()?.song.voices[voiceIndex];
   });
 
   const maxScore = createMemo(() => {
@@ -62,7 +64,7 @@ export function createPlayer(options: Accessor<CreatePlayerOptions>) {
   });
 
   const microphone = createMemo(() => {
-    const mic = settingsStore.microphones()[options().index];
+    const mic = roundSong()?.players[options().index]?.microphone;
     if (!mic) {
       throw new Error("Microphone not found");
     }
@@ -78,6 +80,8 @@ export function createPlayer(options: Accessor<CreatePlayerOptions>) {
 
     return game.beat() - delayInBeats;
   });
+
+  const delayedFlooredBeat = createMemo(() => Math.floor(delayedBeat()));
 
   const beats = createMemo(() => {
     const beatMap = new Map<
@@ -106,81 +110,98 @@ export function createPlayer(options: Accessor<CreatePlayerOptions>) {
 
   const processedBeats = new ReactiveMap<
     number,
-    { note: Note; midiNote: number; isFirstInPhrase: boolean; isFirstInNote: boolean }
+    { note: Note; midiNote: number; rawMidiNote: number; isFirstInPhrase: boolean; isFirstInNote: boolean }
   >();
-
-  const delayedFlooredBeat = createMemo(() => {
-    return Math.floor(delayedBeat());
-  });
 
   let correctBeats = 0;
   let totalBeats = 0;
+
+  const [phraseRating, setPhraseRating] = createSignal<{ id: number; rating: PhraseRating } | null>(null);
+  let phraseRatingId = 0;
 
   const awardBonus = () => {
     if (totalBeats > 0 && correctBeats / totalBeats > 0.9) {
       addScore("bonus", correctBeats);
     }
 
+    const rating = getPhraseRating(correctBeats, totalBeats);
+    if (rating) {
+      setPhraseRating({ id: phraseRatingId++, rating });
+    }
+
     correctBeats = 0;
     totalBeats = 0;
   };
 
-  createEffect(async () => {
-    const flooredBeat = delayedFlooredBeat();
+  let lastProcessedBeat = -1;
 
-    const beatInfo = beats().get(flooredBeat);
+  createEffect(
+    on(
+      () => game.pitches(),
+      (allPitches) => {
+        // The processor always returns the most recent pitch; compensate for
+        // this mic's input delay by scoring it against the corresponding
+        // earlier beat.
+        const flooredBeat = delayedFlooredBeat();
 
-    if (!beatInfo) {
-      return;
-    }
+        if (flooredBeat === lastProcessedBeat) {
+          return;
+        }
+        lastProcessedBeat = flooredBeat;
 
-    const noteScore = getNoteScore(beatInfo.note);
+        const beatInfo = beats().get(flooredBeat);
 
-    if (noteScore > 0) {
-      totalBeats++;
+        if (!beatInfo) {
+          return;
+        }
 
-      const result = await commands.getPitch(options().index);
+        const noteScore = getNoteScore(beatInfo.note);
 
-      if (result.status !== "error") {
-        const midiNote = pitchProcessor.process(result.data, beatInfo.note);
+        if (noteScore > 0) {
+          totalBeats++;
 
-        const isRap = beatInfo.note.type.startsWith("Rap");
+          const pitch = allPitches[options().index] ?? -1;
 
-        // Determine if the note was sung correctly
-        const isCorrect = isRap ? midiNote > 0 && midiNote !== -1 : midiNote === beatInfo.note.midiNote;
+          const { midiNote, rawMidiNote } = pitchProcessor.process(pitch, beatInfo.note);
 
-        if (isCorrect) {
-          correctBeats++;
+          const isRap = beatInfo.note.type.startsWith("Rap");
 
-          if (beatInfo.note.type === "Golden" || beatInfo.note.type === "RapGolden") {
-            addScore("golden", noteScore);
-          } else if (beatInfo.note.type === "Normal" || beatInfo.note.type === "Rap") {
-            addScore("normal", noteScore);
+          const isCorrect = isRap ? midiNote > 0 && midiNote !== -1 : midiNote === beatInfo.note.midiNote;
+
+          if (isCorrect) {
+            correctBeats++;
+
+            if (beatInfo.note.type === "Golden" || beatInfo.note.type === "RapGolden") {
+              addScore("golden", noteScore);
+            } else if (beatInfo.note.type === "Normal" || beatInfo.note.type === "Rap") {
+              addScore("normal", noteScore);
+            }
+          }
+
+          if (midiNote > 0) {
+            processedBeats.set(flooredBeat, {
+              note: beatInfo.note,
+              midiNote: isRap ? beatInfo.note.midiNote : midiNote,
+              rawMidiNote: isRap ? beatInfo.note.midiNote : rawMidiNote,
+              isFirstInPhrase: beatInfo.isFirstInPhrase,
+              isFirstInNote: beatInfo.isFirstInNote,
+            });
           }
         }
 
-        if (midiNote > 0) {
-          processedBeats.set(flooredBeat, {
-            note: beatInfo.note,
-            midiNote: isRap ? beatInfo.note.midiNote : midiNote,
-            isFirstInPhrase: beatInfo.isFirstInPhrase,
-            isFirstInNote: beatInfo.isFirstInNote,
-          });
+        if (beatInfo.isLastInPhrase) {
+          awardBonus();
         }
-      }
-    }
-
-    if (beatInfo.isLastInPhrase) {
-      awardBonus();
-    }
-  });
+      },
+    ),
+  );
 
   const addScore = (type: "normal" | "golden" | "bonus", value: number) => {
     game.addScore(options().index, type, value);
   };
 
   const score = () => game.scores()[options().index] ?? { normal: 0, golden: 0, bonus: 0 };
-  const player = () => roundStore.settings()?.players[options().index] || null;
+  const player = () => roundSong()?.players[options().index]?.player ?? null;
 
   const values: PlayerContextValue = {
     index: () => options().index,
@@ -194,6 +215,7 @@ export function createPlayer(options: Accessor<CreatePlayerOptions>) {
     maxScore,
     player,
     score,
+    phraseRating,
   };
 
   const Provider = (props: { children: JSX.Element }) => (

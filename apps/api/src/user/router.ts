@@ -1,5 +1,6 @@
 import { os } from "@orpc/server";
 import * as v from "valibot";
+
 import { requireUser } from "../auth/middleware";
 import { authService } from "../auth/service";
 import { base } from "../base";
@@ -30,6 +31,9 @@ export const userRouter = os.prefix("/users").router({
       USERNAME_ALREADY_TAKEN: {
         status: 400,
       },
+      INVALID_CURRENT_PASSWORD: {
+        status: 403,
+      },
     })
     .input(
       v.object({
@@ -41,7 +45,8 @@ export const userRouter = os.prefix("/users").router({
             v.maxSize(1024 * 1024 * 5), // 5MB
           ),
         ),
-        password: v.optional(v.string()),
+        password: v.optional(v.pipe(v.string(), v.minLength(8))),
+        currentPassword: v.optional(v.string()),
       }),
     )
     .use(requireUser)
@@ -63,12 +68,37 @@ export const userRouter = os.prefix("/users").router({
       }
 
       if (input.password) {
+        const user = await userService.getUserByIdWithPassword(context.payload.sub);
+
+        // Accounts with an existing password must confirm it before setting a new one.
+        if (user?.password) {
+          const isCurrentPasswordValid = input.currentPassword
+            ? await Bun.password.verify(input.currentPassword, user.password)
+            : false;
+
+          if (!isCurrentPasswordValid) {
+            throw errors.INVALID_CURRENT_PASSWORD();
+          }
+        }
+
         newUser.password = await authService.hashPassword(input.password);
       }
 
       const updatedUser = await userService.updateUser(context.payload.sub, newUser);
 
-      return updatedUser;
+      if (input.password) {
+        // Invalidate all other sessions after a password change.
+        const currentRefreshToken = context.cookies?.get("refresh_token");
+        await authService.deleteAllRefreshTokensForUser(context.payload.sub, currentRefreshToken ?? undefined);
+      }
+
+      if (!updatedUser) {
+        return updatedUser;
+      }
+
+      // Never return the password hash to the client.
+      const { password: _password, ...updatedUserWithoutPassword } = updatedUser;
+      return updatedUserWithoutPassword;
     }),
 
   getUserImage: base
@@ -81,7 +111,7 @@ export const userRouter = os.prefix("/users").router({
         status: 404,
       },
     })
-    .input(v.object({ id: v.string(), t: v.optional(v.string()) }))
+    .input(v.object({ id: v.pipe(v.string(), v.uuid()), t: v.optional(v.string()) }))
     .handler(async ({ errors, input, context }) => {
       const file = Bun.file(`${env.UPLOADS_PATH}/users/${input.id}.webp`);
       if (!(await file.exists())) {

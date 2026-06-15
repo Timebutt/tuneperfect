@@ -1,6 +1,7 @@
 import * as arctic from "arctic";
 import { eq } from "drizzle-orm";
 import * as v from "valibot";
+
 import { env } from "../../config/env";
 import { db } from "../../lib/db";
 import * as schema from "../../lib/db/schema";
@@ -8,6 +9,7 @@ import type { User } from "../../types";
 import { UsernameSchema } from "../../user/models";
 import { userService } from "../../user/service";
 import { tryCatch } from "../../utils/try-catch";
+import { UnverifiedEmailExistsError } from "./google";
 import { type DiscordProfile, discordProfileSchema } from "./models";
 
 class DiscordOAuthClient {
@@ -51,12 +53,16 @@ class DiscordOAuthClient {
     if (!profile || !profile.verified) {
       return null;
     }
-    const user = await userService.getUserByEmail(profile.email);
+    const user = await userService.getUserByEmailWithPassword(profile.email);
     if (!user) {
       return await this.createUser(profile);
     }
     if (!user.emailVerified) {
-      return null;
+      // If unverified account has a password, reject the merge
+      if (user.password) {
+        throw new UnverifiedEmailExistsError();
+      }
+      // If no password, proceed with merge (auto-verify and link OAuth)
     }
 
     return await this.mergeUser(user, profile);
@@ -68,14 +74,21 @@ class DiscordOAuthClient {
       mergedUser.image = `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png`;
     }
 
+    // If the account wasn't verified, mark it as verified now
+    if (!mergedUser.emailVerified) {
+      mergedUser.emailVerified = true;
+    }
+
     await db.transaction(async (tx) => {
+      const updateData: Partial<typeof schema.users.$inferInsert> = {};
       if (!user.image && profile.avatar) {
-        await tx
-          .update(schema.users)
-          .set({
-            image: `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png`,
-          })
-          .where(eq(schema.users.id, user.id));
+        updateData.image = `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png`;
+      }
+      if (!user.emailVerified) {
+        updateData.emailVerified = true;
+      }
+      if (Object.keys(updateData).length > 0) {
+        await tx.update(schema.users).set(updateData).where(eq(schema.users.id, user.id));
       }
       await tx.insert(schema.oauthAccounts).values({
         userId: user.id,

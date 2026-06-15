@@ -1,18 +1,26 @@
 {
   "name": "tuneperfect",
-  "scripts": {
-    "dev": "turbo run dev --parallel --force",
-    "build": "turbo run build"
-  },
-  "devDependencies": {
-    "turbo": "^2.5.5"
-  },
-  "dependencies": {
-    "@biomejs/biome": "2.0.6"
-  },
   "workspaces": [
     "packages/*",
     "apps/*"
   ],
-  "packageManager": "bun@1.2.20"
+  "scripts": {
+    "dev": "turbo run dev --parallel --force",
+    "build": "turbo run build",
+    "tuneperfect": "bun run ./node_modules/@tuneperfect/cli/src/index.ts",
+    "test": "turbo run test",
+    "lint": "oxlint",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check"
+  },
+  "dependencies": {
+    "@tuneperfect/cli": "workspace:*"
+  },
+  "devDependencies": {
+    "eslint-plugin-solid": "^0.14.5",
+    "oxfmt": "^0.51.0",
+    "oxlint": "^1.68.0",
+    "turbo": "^2.9.16"
+  },
+  "packageManager": "bun@1.3.14"
 }

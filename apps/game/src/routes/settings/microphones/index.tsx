@@ -1,7 +1,10 @@
 import { createFileRoute, useNavigate } from "@tanstack/solid-router";
-import { type Component, createEffect, createMemo, createSignal, For, on } from "solid-js";
-import KeyHints from "~/components/key-hints";
+import { createEffect, createMemo, createSignal, For, type JSX, on } from "solid-js";
+import IconMicVocal from "~icons/lucide/mic-vocal";
+import IconPlus from "~icons/lucide/plus";
+
 import Layout from "~/components/layout";
+import SettingsFooter from "~/components/settings-footer";
 import TitleBar from "~/components/title-bar";
 import IconButton from "~/components/ui/icon-button";
 import { createLoop } from "~/hooks/loop";
@@ -9,8 +12,6 @@ import { useNavigation } from "~/hooks/navigation";
 import { t } from "~/lib/i18n";
 import { playSound } from "~/lib/sound";
 import { settingsStore } from "~/stores/settings";
-import IconMicVocal from "~icons/lucide/mic-vocal";
-import IconPlus from "~icons/lucide/plus";
 
 export const Route = createFileRoute("/settings/microphones/")({
   component: MicrophonesComponent,
@@ -28,24 +29,24 @@ function MicrophonesComponent() {
   const buttons = createMemo(() => {
     const buttons: {
       label: string;
-      icon: Component<{ class?: string }>;
+      icon: JSX.Element;
       action?: () => void;
     }[] = [];
 
     for (const [index, microphone] of settingsStore.microphones().entries()) {
       buttons.push({
         label: microphone.name,
-        icon: IconMicVocal,
+        icon: <IconMicVocal class="text-6xl" />,
         action: () => {
           navigate({ to: "/settings/microphones/$id", params: { id: index.toString() } });
         },
       });
     }
 
-    if (settingsStore.microphones().length < 2) {
+    if (settingsStore.microphones().length < 4) {
       buttons.push({
         label: t("settings.add"),
-        icon: IconPlus,
+        icon: <IconPlus class="text-6xl" />,
         action: () => {
           navigate({ to: "/settings/microphones/$id", params: { id: settingsStore.microphones().length.toString() } });
         },
@@ -88,9 +89,9 @@ function MicrophonesComponent() {
       header={
         <TitleBar title={t("settings.title")} description={t("settings.sections.microphones.title")} onBack={onBack} />
       }
-      footer={<KeyHints hints={["back", "navigate", "confirm"]} />}
+      footer={<SettingsFooter />}
     >
-      <div class="flex w-full flex-grow items-center justify-center gap-4">
+      <div class="flex w-full grow items-center justify-center gap-4">
         <For each={buttons()}>
           {(button, index) => (
             <IconButton

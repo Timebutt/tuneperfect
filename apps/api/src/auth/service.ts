@@ -1,10 +1,12 @@
 import crypto from "node:crypto";
+
 import { renderResetPassword, renderVerifyEmail } from "@tuneperfect/email";
 import { addDays, addHours, addMinutes, addYears, differenceInSeconds, isAfter, isBefore } from "date-fns";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import jwt from "jsonwebtoken";
 import { joinURL, withQuery } from "ufo";
 import * as v from "valibot";
+
 import { env } from "../config/env";
 import { db } from "../lib/db";
 import * as schema from "../lib/db/schema";
@@ -132,13 +134,17 @@ class AuthService {
     return { token, expires };
   }
 
+  private hashToken(token: string) {
+    return crypto.createHash("sha256").update(token).digest("hex");
+  }
+
   async generateAndStoreRefreshToken(user: User, userAgent: string) {
     const token = crypto.randomBytes(32).toString("hex");
     const expires = addDays(new Date(), 7);
 
     await db.insert(schema.refreshTokens).values({
       userId: user.id,
-      token,
+      token: this.hashToken(token),
       userAgent,
       expires,
     });
@@ -147,9 +153,11 @@ class AuthService {
   }
 
   async verifyAndRotateRefreshToken(refreshToken: string) {
+    const hashedToken = this.hashToken(refreshToken);
+
     const token = await db.query.refreshTokens.findFirst({
       where: {
-        token: refreshToken,
+        token: hashedToken,
       },
       with: {
         user: true,
@@ -161,13 +169,13 @@ class AuthService {
     }
 
     if (isBefore(token.expires, new Date())) {
-      await db.delete(schema.refreshTokens).where(eq(schema.refreshTokens.token, refreshToken));
+      await db.delete(schema.refreshTokens).where(eq(schema.refreshTokens.token, hashedToken));
 
       return null;
     }
 
     if (isAfter(new Date(), addYears(token.createdAt, 1))) {
-      await db.delete(schema.refreshTokens).where(eq(schema.refreshTokens.token, refreshToken));
+      await db.delete(schema.refreshTokens).where(eq(schema.refreshTokens.token, hashedToken));
 
       return null;
     }
@@ -177,18 +185,33 @@ class AuthService {
 
     await db
       .update(schema.refreshTokens)
-      .set({ expires: newExpires, token: newToken })
-      .where(eq(schema.refreshTokens.token, refreshToken));
+      .set({ expires: newExpires, token: this.hashToken(newToken) })
+      .where(eq(schema.refreshTokens.token, hashedToken));
 
     return { token: newToken, expires: newExpires, user: token.user };
   }
 
   async deleteRefreshToken(refreshToken: string) {
-    await db.delete(schema.refreshTokens).where(eq(schema.refreshTokens.token, refreshToken));
+    await db.delete(schema.refreshTokens).where(eq(schema.refreshTokens.token, this.hashToken(refreshToken)));
+  }
+
+  async deleteAllRefreshTokensForUser(userId: string, exceptToken?: string) {
+    if (exceptToken) {
+      await db
+        .delete(schema.refreshTokens)
+        .where(
+          and(eq(schema.refreshTokens.userId, userId), ne(schema.refreshTokens.token, this.hashToken(exceptToken))),
+        );
+      return;
+    }
+
+    await db.delete(schema.refreshTokens).where(eq(schema.refreshTokens.userId, userId));
   }
 
   async verifyAccessToken(accessToken: string) {
-    const [error, decoded] = await tryCatch(() => jwt.verify(accessToken, env.JWT_SECRET));
+    const [error, decoded] = await tryCatch(() =>
+      jwt.verify(accessToken, env.JWT_SECRET, { issuer: env.API_URL, audience: env.API_URL, algorithms: ["HS256"] }),
+    );
 
     if (error) {
       return null;

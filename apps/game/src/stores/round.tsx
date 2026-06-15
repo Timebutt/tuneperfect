@@ -2,14 +2,34 @@ import { type LinkProps, useNavigate } from "@tanstack/solid-router";
 import { createSignal } from "solid-js";
 import { sendWebsocketMessage } from "~/hooks/websocket";
 import type { User } from "~/lib/types";
-import type { LocalSong } from "~/lib/ultrastar/song";
 import { getMaxScore, getRelativeScore } from "~/lib/utils/score";
 
-export interface RoundSettings {
-  song: LocalSong;
-  players: (User | undefined)[];
-  voices: number[];
-  returnTo?: LinkProps["to"];
+import { getMedleySong } from "~/lib/ultrastar/medley";
+import { type Song, isLocalSong } from "~/lib/ultrastar/song";
+
+import type { Voice } from "~/bindings";
+import type { Microphone } from "./settings";
+
+export interface PlayerSelection {
+  player: User;
+  voice: number;
+  microphone: Microphone;
+}
+
+export type RoundMode = "single" | "medley";
+export type RoundLength = "full" | "medium" | "short";
+
+const TARGET_DURATION_MS: Record<RoundLength, number | null> = {
+  full: null,
+  medium: 60_000,
+  short: 30_000,
+};
+
+export interface QueuedSong {
+  song: Song;
+  players: PlayerSelection[];
+  mode: RoundMode;
+  length: RoundLength;
 }
 
 export interface Score {
@@ -18,20 +38,30 @@ export interface Score {
   bonus: number;
 }
 
+interface Result {
+  scores: Score[];
+  song: QueuedSong;
+}
+
+export interface RoundSettings {
+  songs: QueuedSong[];
+  returnTo?: LinkProps["to"];
+}
+
 function createRoundStore() {
   const [settings, setSettings] = createSignal<RoundSettings>();
-  const [scores, setScores] = createSignal<Score[]>([]);
+  const [results, setResults] = createSignal<Result[]>([]);
 
   const reset = () => {
     setSettings(undefined);
-    setScores([]);
+    setResults([]);
   };
 
   return {
     settings,
-    scores,
+    results,
     setSettings,
-    setScores,
+    setResults,
     reset,
   };
 }
@@ -42,25 +72,52 @@ export function useRoundActions() {
   const navigate = useNavigate();
 
   const startRound = (settings: RoundSettings) => {
-    roundStore.setSettings(settings);
-    roundStore.setScores([]);
+    const songs = settings.songs.map((queued) => {
+      const targetDurationMs = TARGET_DURATION_MS[queued.length];
+      // Only local songs can be trimmed to a medley; online songs play full.
+      if (targetDurationMs === null || !isLocalSong(queued.song)) {
+        return queued;
+      }
+      return {
+        ...queued,
+        song: getMedleySong(queued.song, targetDurationMs),
+      };
+    });
+    roundStore.setSettings({ ...settings, songs });
+    roundStore.setResults([]);
     navigate({ to: "/game" });
   };
 
   const endRound = (scores: Score[], submitScores: boolean) => {
-    if (submitScores) {
-      roundStore.setScores(scores);
+    if (!submitScores) {
+navigate({ to: "/sing" });
+return;
+    }
 
-      const voicesCount = roundStore.settings()?.song?.voices.length;
-      if (!voicesCount) {
-        return;
-      }
+    const song = roundStore.settings()?.songs[0];
+    if (!song) return;
 
-      sendWebsocketMessage(
+    roundStore.setResults((prev) => [...prev, { scores, song }]);
+
+    const nextSong = roundStore.settings()?.songs[1];
+
+    if (nextSong) {
+      navigate({ to: "/game/next" });
+
+      return;
+    }
+
+    sendWebsocketMessage(
         JSON.stringify({
           type: "scores",
           value: scores.map((absoluteScore, index) => {
-            const voice = roundStore.settings()?.song?.voices[index + 1 > voicesCount ? 0 : index];
+
+
+
+            // TO-DO: fix this!
+            // const voice = roundStore.settings()?.song?.voices[index + 1 > voicesCount ? 0 : index];
+            index;
+            const voice = {} as Voice;
             if (!voice) {
               return 0;
             }
@@ -72,19 +129,39 @@ export function useRoundActions() {
         }),
       );
 
-      navigate({ to: "/game/score" });
-    } else {
-      navigate({ to: "/sing" });
-    }
+    navigate({ to: "/game/score" });
+  };
+
+  const endMedley = (scores: Score[]) => {
+    const song = roundStore.settings()?.songs[0];
+    if (!song) return;
+
+    roundStore.setResults((prev) => [...prev, { scores, song }]);
+    roundStore.setSettings((prev) => (prev ? { ...prev, songs: prev.songs.slice(0, 1) } : prev));
+
+    navigate({ to: "/game/score" });
   };
 
   const returnRound = () => {
     navigate({ to: roundStore.settings()?.returnTo ?? "/sing" });
   };
 
+  // The current song could not be played (e.g. unsupported media). Record an empty-score
+  // result so party modes can detect the failure (and e.g. swap the song) instead of
+  // navigating back with a stale or missing result, then return to the party screen.
+  const failRound = () => {
+    const song = roundStore.settings()?.songs[0];
+    if (song) {
+      roundStore.setResults((prev) => [...prev, { scores: [], song }]);
+    }
+    navigate({ to: roundStore.settings()?.returnTo ?? "/sing" });
+  };
+
   return {
     startRound,
     endRound,
+    endMedley,
     returnRound,
+    failRound,
   };
 }

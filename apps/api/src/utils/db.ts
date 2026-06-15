@@ -2,6 +2,7 @@ import type { SQL as BunSQL } from "bun";
 import type { SQL } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
+
 import { logger } from "../lib/logger";
 
 export function lower(email: AnyPgColumn): SQL {
@@ -19,7 +20,7 @@ export async function locked<T>(client: BunSQL, lockId: number, callback: () => 
     try {
       await reservedClient`SELECT pg_advisory_unlock(${lockId})`;
     } catch (error) {
-      logger.warn(`Failed to release advisory lock ${lockId}:`, error);
+      logger.warn(error, `Failed to release advisory lock ${lockId}`);
     }
 
     reservedClient.release();

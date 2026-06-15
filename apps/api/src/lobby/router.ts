@@ -1,5 +1,6 @@
 import { os } from "@orpc/server";
 import * as v from "valibot";
+
 import { requireUser } from "../auth/middleware";
 import { base } from "../base";
 import { userService } from "../user/service";
@@ -7,22 +8,29 @@ import { requireLobby, requireLobbyOrUser } from "./middleware";
 import { lobbyService } from "./service";
 
 export const lobbyRouter = os.prefix("/lobbies").router({
-  createLobby: base.handler(async ({ errors }) => {
-    const lobby = await lobbyService.createLobby();
+  createLobby: base
+    .meta({
+      rateLimit: {
+        limit: 10,
+        windowMs: 1000 * 60 * 5,
+      },
+    })
+    .handler(async ({ errors }) => {
+      const lobby = await lobbyService.createLobby();
 
-    if (!lobby) {
-      throw errors.INTERNAL_SERVER_ERROR({
-        message: "Failed to create lobby",
-      });
-    }
+      if (!lobby) {
+        throw errors.INTERNAL_SERVER_ERROR({
+          message: "Failed to create lobby",
+        });
+      }
 
-    const token = await lobbyService.generateLobbyToken(lobby.id);
+      const token = await lobbyService.generateLobbyToken(lobby.id);
 
-    return {
-      lobbyId: lobby.id,
-      token,
-    };
-  }),
+      return {
+        lobbyId: lobby.id,
+        token,
+      };
+    }),
 
   currentLobby: base
     .use(requireLobbyOrUser)
@@ -68,6 +76,12 @@ export const lobbyRouter = os.prefix("/lobbies").router({
         status: 404,
       },
     })
+    .meta({
+      rateLimit: {
+        limit: 50,
+        windowMs: 1000 * 60 * 5,
+      },
+    })
     .input(
       v.object({
         lobbyId: v.string(),
@@ -102,8 +116,23 @@ export const lobbyRouter = os.prefix("/lobbies").router({
 
   updateSelectedClub: base
     .use(requireLobby)
+    .errors({
+      FORBIDDEN: {
+        status: 403,
+      },
+    })
     .input(v.object({ clubId: v.nullable(v.string()) }))
-    .handler(async ({ context, input }) => {
+    .handler(async ({ context, errors, input }) => {
+      if (input.clubId !== null) {
+        const availableClubs = await lobbyService.getAvailableClubsForLobby(context.payload.sub);
+
+        if (!availableClubs.some((club) => club.id === input.clubId)) {
+          throw errors.FORBIDDEN({
+            message: "Club is not available for this lobby",
+          });
+        }
+      }
+
       return await lobbyService.updateLobbySelectedClub(context.payload.sub, input.clubId);
     }),
 

@@ -10,6 +10,10 @@ import { useWakeLock } from "~/hooks/useWakeLock";
 import { initWebSocket } from "~/hooks/websocket";
 import { songsStore } from "~/stores/songs";
 
+import PopupContainer from "~/components/popup-container";
+import { RouteError } from "~/components/route-error";
+import { useWebRTCAutoConnect } from "~/stores/webrtc";
+
 interface RouterContext {
   queryClient: QueryClient;
 }
@@ -18,6 +22,7 @@ const [initialized, setInitialized] = createSignal(false);
 
 export const Route = createRootRouteWithContext<RouterContext>()({
   component: RootComponent,
+  errorComponent: RouteError,
   beforeLoad: async () => {
     if (!initialized()) {
       setInitialized(true);
@@ -28,6 +33,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 
 function RootComponent() {
   useWakeLock();
+  useWebRTCAutoConnect();
 
   const toggleFullscreen = async () => {
     const window = getCurrentWindow();
@@ -123,6 +129,7 @@ function RootComponent() {
       <Suspense>
         <Outlet />
       </Suspense>
+      <PopupContainer />
     </div>
   );
 }

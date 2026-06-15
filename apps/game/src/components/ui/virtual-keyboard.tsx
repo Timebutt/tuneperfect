@@ -1,7 +1,4 @@
 import { createMemo, createSignal, For, type JSX } from "solid-js";
-import { useNavigation } from "~/hooks/navigation";
-import { useTextInput } from "~/hooks/use-text-input";
-import { t } from "~/lib/i18n";
 import IconArrowBigDown from "~icons/lucide/arrow-big-down";
 import IconArrowBigLeft from "~icons/lucide/arrow-big-left";
 import IconArrowBigUp from "~icons/lucide/arrow-big-up";
@@ -9,6 +6,10 @@ import IconGamepadB from "~icons/sing/gamepad-b";
 import IconGamepadX from "~icons/sing/gamepad-x";
 import IconTriangleLeft from "~icons/sing/triangle-left";
 import IconTriangleRight from "~icons/sing/triangle-right";
+
+import { useNavigation } from "~/hooks/navigation";
+import { useTextInput } from "~/hooks/use-text-input";
+import { t } from "~/lib/i18n";
 
 interface VirtualKeyboardProps {
   inputRef: HTMLInputElement;
@@ -177,7 +178,7 @@ export function VirtualKeyboard(props: VirtualKeyboardProps) {
   });
 
   return (
-    <div class="grid grid-cols-[repeat(10,2cqw)] gap-1 rounded-lg bg-slate-900 p-2 text-white">
+    <div class="grid grid-cols-[repeat(10,2cqw)] gap-1 rounded-lg bg-black/30 p-2 text-white backdrop-blur-md">
       <For each={activeKeys()}>
         {(row, rowIndex) => (
           <For each={row}>
@@ -186,9 +187,9 @@ export function VirtualKeyboard(props: VirtualKeyboardProps) {
                 type="button"
                 class="relative flex h-8 cursor-pointer items-center justify-center rounded-md transition-transform ease-in-out active:scale-95"
                 classList={{
-                  "gradient-sing bg-gradient-to-r": rowIndex() === position().row && colIndex() === position().col,
+                  "gradient-sing bg-linear-to-r": rowIndex() === position().row && colIndex() === position().col,
                   "scale-95": rowIndex() === position().row && colIndex() === position().col && pressed(),
-                  "bg-slate-800": key.highlight,
+                  "bg-white/10": key.highlight,
                 }}
                 style={{ "grid-column": `span ${key.colSpan || 1}` }}
                 onMouseEnter={() => setPosition({ row: rowIndex(), col: colIndex() })}

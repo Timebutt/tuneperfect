@@ -1,16 +1,18 @@
 import { createFileRoute, useNavigate } from "@tanstack/solid-router";
-import { type Component, createEffect, createMemo, createSignal, For, on } from "solid-js";
-import KeyHints from "~/components/key-hints";
+import { createEffect, createMemo, createSignal, For, type JSX, on } from "solid-js";
+import IconPlus from "~icons/lucide/plus";
+import IconUser from "~icons/lucide/user";
+
 import Layout from "~/components/layout";
+import SettingsFooter from "~/components/settings-footer";
 import TitleBar from "~/components/title-bar";
+import Avatar from "~/components/ui/avatar";
 import IconButton from "~/components/ui/icon-button";
 import { createLoop } from "~/hooks/loop";
 import { useNavigation } from "~/hooks/navigation";
 import { t } from "~/lib/i18n";
 import { playSound } from "~/lib/sound";
 import { localStore } from "~/stores/local";
-import IconPlus from "~icons/lucide/plus";
-import IconUser from "~icons/lucide/user";
 
 export const Route = createFileRoute("/settings/local-players/")({
   component: LocalPlayersComponent,
@@ -34,14 +36,18 @@ function LocalPlayersComponent() {
   const buttons = createMemo(() => {
     const buttons: {
       label: string;
-      icon: Component<{ class?: string }>;
+      icon: JSX.Element;
       action?: () => void;
     }[] = [];
 
     for (const player of localStore.players()) {
       buttons.push({
         label: player.username,
-        icon: IconUser,
+        icon: player.image ? (
+          <Avatar user={{ username: player.username, image: player.image }} class="h-24 w-24 text-3xl" />
+        ) : (
+          <IconUser class="text-6xl" />
+        ),
         action: () =>
           navigate({
             to: "/settings/local-players/$id",
@@ -54,7 +60,7 @@ function LocalPlayersComponent() {
 
     buttons.push({
       label: t("settings.add"),
-      icon: IconPlus,
+      icon: <IconPlus class="text-6xl" />,
       action: () => {
         navigate({
           to: "/settings/local-players/$id",
@@ -118,15 +124,15 @@ function LocalPlayersComponent() {
       header={
         <TitleBar title={t("settings.title")} description={t("settings.sections.localPlayers.title")} onBack={onBack} />
       }
-      footer={<KeyHints hints={["back", "navigate", "confirm"]} />}
+      footer={<SettingsFooter />}
     >
-      <div class="flex w-full flex-grow items-center justify-center gap-4">
+      <div class="flex w-full grow items-center justify-center gap-4">
         <div ref={scrollContainer} class="styled-scrollbars flex gap-4 overflow-y-auto py-2">
           <For each={buttons()}>
             {(button, index) => (
               <IconButton
                 ref={setButtonRef(index())}
-                class="flex-shrink-0"
+                class="shrink-0"
                 onClick={() => button.action?.()}
                 onMouseEnter={() => set(index())}
                 selected={position() === index()}
