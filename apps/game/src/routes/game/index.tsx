@@ -304,7 +304,7 @@ function GameComponent() {
                 <div class="relative flex h-full w-full flex-col items-center justify-center gap-2">
                   <p class="text-6xl">{roundSong()?.song.artist}</p>
                   <div class="px-8 text-center">
-                    <span class="text-center font-bold text-8xl">{roundSong()?.song.title}</span>
+                    <span class="text-center text-8xl font-bold">{roundSong()?.song.title}</span>
                   </div>
                 </div>
               </div>

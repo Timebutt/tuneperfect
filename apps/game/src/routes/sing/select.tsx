@@ -483,7 +483,7 @@ function SelectPlayerPopup(props: SelectPlayerPopupProps) {
       footer={<KeyHints hints={["back", "navigate", "confirm"]} />}
     >
       <Show when={song()}>
-        <h1 class="height-full text-center font-bold text-8xl">{`${song()?.artist} - ${song()?.title}`}</h1>
+        <h1 class="height-full text-center text-8xl font-bold">{`${song()?.artist} - ${song()?.title}`}</h1>
       </Show>
 
       <Menu items={playerMenuItems()} onBack={handleBack} gradient="gradient-sing" layer={1} />

@@ -99,7 +99,7 @@ export default function Lyrics(props: LyricsProps) {
                 italic: note.type === "Freestyle",
               }}
             >
-              {note.text.replaceAll('~', '')}
+              {note.text.replaceAll("~", "")}
             </span>
           )}
         </For>
@@ -131,14 +131,14 @@ function LyricsNote(props: LyricsNoteProps) {
       style={{
         "background-image": `linear-gradient(to right, ${props.color} ${percentage()}%, white ${percentage()}%)`,
       }}
-      class="inline-block bg-clip-text leading-relaxed whitespace-pre text-transparent text-[62px]"
+      class="inline-block bg-clip-text text-[62px] leading-relaxed whitespace-pre text-transparent"
       classList={{
         "m-[-0.15cqw] p-[0.15cqw] italic": props.note.type === "Freestyle",
         "text-4xl": !props.compact,
         "text-3xl": props.compact,
       }}
     >
-      {props.note.text.replaceAll('~', '')}
+      {props.note.text.replaceAll("~", "")}
     </span>
   );
 }

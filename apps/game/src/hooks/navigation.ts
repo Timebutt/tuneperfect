@@ -143,17 +143,15 @@ const pressedGamepadButtons = new Map<string, { holdTimeout: number; repeatInter
 const HOLD_DELAY = 400;
 const REPEAT_DELAY = 50;
 
-
-createEventListener(document, 'contextmenu', (event) => {
-
+createEventListener(document, "contextmenu", (event) => {
   event.preventDefault();
 
-   emitter.emit("keydown", {
-        origin: "keyboard",
-        originalKey: 'mkjqsdf',
-        modifiers: undefined,
-        action: 'back',
-      });
+  emitter.emit("keydown", {
+    origin: "keyboard",
+    originalKey: "mkjqsdf",
+    modifiers: undefined,
+    action: "back",
+  });
 });
 
 createRoot(() => {

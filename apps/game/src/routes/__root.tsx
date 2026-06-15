@@ -4,14 +4,14 @@ import type { QueryClient } from "@tanstack/solid-query";
 import { createRootRouteWithContext, Outlet, redirect, useNavigate } from "@tanstack/solid-router";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { createSignal, Suspense } from "solid-js";
+
+import PopupContainer from "~/components/popup-container";
+import { RouteError } from "~/components/route-error";
 import { createMidiNoteListener, registerMidiInputs } from "~/hooks/midi";
 import { useNavigation } from "~/hooks/navigation";
 import { useWakeLock } from "~/hooks/useWakeLock";
 import { initWebSocket } from "~/hooks/websocket";
 import { songsStore } from "~/stores/songs";
-
-import PopupContainer from "~/components/popup-container";
-import { RouteError } from "~/components/route-error";
 import { useWebRTCAutoConnect } from "~/stores/webrtc";
 
 interface RouterContext {
