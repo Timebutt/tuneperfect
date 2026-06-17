@@ -9,7 +9,7 @@ import PopupContainer from "~/components/popup-container";
 import { RouteError } from "~/components/route-error";
 import { createMidiNoteListener, registerMidiInputs } from "~/hooks/midi";
 import { useNavigation } from "~/hooks/navigation";
-import { useWakeLock } from "~/hooks/useWakeLock";
+import { useWakeLock } from "~/hooks/use-wake-lock";
 import { initWebSocket } from "~/hooks/websocket";
 import { songsStore } from "~/stores/songs";
 import { useWebRTCAutoConnect } from "~/stores/webrtc";

@@ -178,7 +178,7 @@ export type Song = {
 	medleyStart: number | null,
 	medleyEnd: number | null,
 	voices: Voice[],
-	midiNote: number | null
+	midiNote: number | null,
 };
 
 export type SongGroup = {
