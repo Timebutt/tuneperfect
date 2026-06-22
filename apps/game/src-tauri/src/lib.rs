@@ -98,7 +98,8 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
         // Apparently enabling this on Windows crashes this!
-        // .plugin(tauri_plugin_midi::init())
+        // We need this to run the app on macOS!
+        .plugin(tauri_plugin_midi::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
