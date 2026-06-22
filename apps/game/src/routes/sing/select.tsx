@@ -58,7 +58,13 @@ function PlayerSelectionComponent() {
   const playerSlotLoop = createLoop(settingsStore.microphones().length);
   const roundActions = useRoundActions();
 
+  // Start game on MIDI note 30 (C3).
   createMidiNoteListener(1, 30, () => {
+    startGame();
+  });
+
+  // MIDI Note 9 is the bottom left switch on the Harley Benton MP100 in Fortress Utility page
+  createMidiNoteListener(1, 9, () => {
     startGame();
   });
 

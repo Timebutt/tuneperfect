@@ -32,6 +32,16 @@ export default function PauseMenu(props: PauseMenuProps) {
     props.onExit?.();
   });
 
+  // MIDI Note 9 is the bottom left switch on the Harley Benton MP100 in Fortress Utility page
+  createMidiNoteListener(1, 9, () => {
+    props.onRestart?.();
+  });
+
+  // MIDI Note 10 is the bottom second switch on the Harley Benton MP100 in Fortress Utility page
+  createMidiNoteListener(1, 10, () => {
+    props.onExit?.();
+  });
+
   const menuItems = (): MenuItem[] => [
     {
       type: "button",

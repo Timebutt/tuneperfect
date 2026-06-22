@@ -75,6 +75,11 @@ function GameComponent() {
     pause();
   });
 
+  // MIDI Note 10 is the bottom second switch on the Harley Benton MP100 in Fortress Utility page
+  createMidiNoteListener(1, 10, () => {
+    pause();
+  });
+
   // Delayed by a little bit to ensure there's no glitch in OBS
   setTimeout(() => {
     sendMidiNote(1, 2);
