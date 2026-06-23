@@ -111,8 +111,27 @@ impl DeviceManager {
         Ok(found_devices)
     }
 
-    /// Get the default output device configuration.
+    /// Find an output device by display name, or return the system default.
+    fn find_output_device(&self, preferred_name: Option<&str>) -> Result<Device, AppError> {
+        if let Some(name) = preferred_name {
+            if let Ok(devices) = self.host.output_devices() {
+                for device in devices {
+                    let device_name = device.description().ok().map(|d| device_display_name(&d));
+                    if device_name.as_deref() == Some(name) {
+                        return Ok(device);
+                    }
+                }
+            }
+        }
+        self.host
+            .default_output_device()
+            .ok_or_else(|| AppError::CpalError("No output device available".to_string()))
+    }
+
+    /// Get the output device configuration.
     ///
+    /// When `preferred_device_name` is provided, we try to find that device by its
+    /// display name and fall back to the system default if it can't be found.
     /// When `desired_sample_rate` is provided, we try to configure the output at
     /// that rate so it matches the input and the resampler can be bypassed. If
     /// the device's default config doesn't support that rate, we fall back to the
@@ -120,11 +139,9 @@ impl DeviceManager {
     pub fn get_output_config(
         &self,
         desired_sample_rate: Option<u32>,
+        preferred_device_name: Option<&str>,
     ) -> Result<(Device, StreamConfig), AppError> {
-        let output_device = self
-            .host
-            .default_output_device()
-            .ok_or_else(|| AppError::CpalError("No output device available".to_string()))?;
+        let output_device = self.find_output_device(preferred_device_name)?;
 
         let supported_config = output_device.default_output_config()?;
         let supported_buffer_size = *supported_config.buffer_size();

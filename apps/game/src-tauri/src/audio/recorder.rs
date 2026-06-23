@@ -23,6 +23,8 @@ impl Recorder {
         options: Vec<MicrophoneOptions>,
         playback_enabled: bool,
         playback_volume: f32,
+        output_device_name: Option<String>,
+        output_channel_offset: u32,
     ) -> Result<Self, AppError> {
         let (stop_tx, stop_rx) = mpsc::channel();
 
@@ -33,6 +35,8 @@ impl Recorder {
                 stop_rx,
                 playback_enabled,
                 playback_volume,
+                output_device_name,
+                output_channel_offset,
             )
         });
 
@@ -49,6 +53,8 @@ impl Recorder {
         stop_rx: mpsc::Receiver<()>,
         playback_enabled: bool,
         playback_volume: f32,
+        output_device_name: Option<String>,
+        output_channel_offset: u32,
     ) -> Result<(), AppError> {
         let device_manager = DeviceManager::new()?;
         let input_devices = device_manager.find_input_devices(&options)?;
@@ -73,7 +79,7 @@ impl Recorder {
         // output stream runs at. Prefer matching the input rate to skip resampling.
         let desired_output_rate = input_sample_rates.iter().copied().find(|&rate| rate != 0);
         let output_config = if playback_enabled {
-            Some(device_manager.get_output_config(desired_output_rate)?)
+            Some(device_manager.get_output_config(desired_output_rate, output_device_name.as_deref())?)
         } else {
             None
         };
@@ -110,8 +116,12 @@ impl Recorder {
         )?;
 
         if let (Some(mixer), Some((output_device, output_config))) = (output_mixer, output_config) {
-            let output_stream =
-                mixer.create_output_stream(output_device, output_config, playback_volume)?;
+            let output_stream = mixer.create_output_stream(
+                output_device,
+                output_config,
+                playback_volume,
+                output_channel_offset as usize,
+            )?;
             streams.push(output_stream);
         }
 

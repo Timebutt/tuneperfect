@@ -13,6 +13,8 @@ pub fn start_recording(
     options: Vec<MicrophoneOptions>,
     playback_enabled: bool,
     playback_volume: f32,
+    output_device_name: Option<String>,
+    output_channel_offset: Option<u32>,
 ) -> Result<(), AppError> {
     let state = app_handle.state::<AppState>();
     let mut recorder = state
@@ -34,6 +36,8 @@ pub fn start_recording(
         options,
         playback_enabled,
         playback_volume,
+        output_device_name,
+        output_channel_offset.unwrap_or(0),
     )?);
     Ok(())
 }
