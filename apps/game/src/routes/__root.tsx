@@ -11,6 +11,7 @@ import { createMidiNoteListener, registerMidiInputs } from "~/hooks/midi";
 import { useNavigation } from "~/hooks/navigation";
 import { useWakeLock } from "~/hooks/use-wake-lock";
 import { initWebSocket } from "~/hooks/websocket";
+import { selectionStore } from "~/stores/selection";
 import { songsStore } from "~/stores/songs";
 import { useWebRTCAutoConnect } from "~/stores/webrtc";
 
@@ -64,7 +65,8 @@ function RootComponent() {
 
         const matchingSong = songsStore.songs().find((song) => song.midiNote === songMidiNote);
         if (matchingSong) {
-          navigate({ to: `/sing/${matchingSong.hash}` });
+          selectionStore.set([matchingSong], "single");
+          navigate({ to: `/sing/select` });
         } else {
           navigate({ to: "/sing" });
         }

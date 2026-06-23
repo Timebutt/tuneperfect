@@ -1,7 +1,6 @@
 import { type LinkProps, useNavigate } from "@tanstack/solid-router";
 import { createSignal } from "solid-js";
 
-import type { Voice } from "~/bindings";
 import { sendWebsocketMessage } from "~/hooks/websocket";
 import type { User } from "~/lib/types";
 import { getMedleySong } from "~/lib/ultrastar/medley";
@@ -103,7 +102,6 @@ export function useRoundActions() {
 
     if (nextSong) {
       navigate({ to: "/game/next" });
-
       return;
     }
 
@@ -111,13 +109,8 @@ export function useRoundActions() {
       JSON.stringify({
         type: "scores",
         value: scores.map((absoluteScore, index) => {
-          // TO-DO: fix this!
-          // const voice = roundStore.settings()?.song?.voices[index + 1 > voicesCount ? 0 : index];
-          index;
-          const voice = {} as Voice;
-          if (!voice) {
-            return 0;
-          }
+          const voice = song.song.voices[index];
+          if (!voice) return 0;
 
           const maxScore = getMaxScore(voice);
           const relativeScore = getRelativeScore(absoluteScore, maxScore);

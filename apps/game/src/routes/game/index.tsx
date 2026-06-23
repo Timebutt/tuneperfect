@@ -123,7 +123,7 @@ function GameComponent() {
 
   const handleEnded = (submitScores: boolean) => {
     queueMicrotask(() => {
-      roundActions.endRound(scores(), submitScores);
+      roundActions.endRound(scores(), submitScores ?? true);
     });
   };
 
