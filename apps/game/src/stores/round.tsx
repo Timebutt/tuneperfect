@@ -105,11 +105,22 @@ export function useRoundActions() {
       return;
     }
 
+    console.log(
+      scores.map((absoluteScore, index) => {
+        const voice = song.song.voices[index] ?? song.song.voices[0];
+        if (!voice) return 0;
+
+        const maxScore = getMaxScore(voice);
+        const relativeScore = getRelativeScore(absoluteScore, maxScore);
+        return Math.floor(relativeScore.normal + relativeScore.golden + relativeScore.bonus);
+      }),
+    );
+
     sendWebsocketMessage(
       JSON.stringify({
         type: "scores",
         value: scores.map((absoluteScore, index) => {
-          const voice = song.song.voices[index];
+          const voice = song.song.voices[index] ?? song.song.voices[0];
           if (!voice) return 0;
 
           const maxScore = getMaxScore(voice);
