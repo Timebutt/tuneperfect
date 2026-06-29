@@ -1,3 +1,5 @@
+const RECONNECT_DELAY_MS = 2000;
+
 let webSocket: WebSocket | undefined;
 
 export async function initWebSocket() {
@@ -6,16 +8,19 @@ export async function initWebSocket() {
 
     // TO-DO: do we need to handle multiple messages coming in, when people push the button multiple times?
     webSocket.onopen = () => {
+      console.log("new websocket opened!");
+
       if (!webSocket) {
         return;
       }
 
-      // webSocket.onmessage = (message) => {
-      //   console.log("webSocket message");
-      //   console.log(message);
-      // };
-
       resolve();
+    };
+
+    webSocket.onclose = () => {
+      console.log("websocket connection lost!");
+
+      setTimeout(() => initWebSocket(), RECONNECT_DELAY_MS);
     };
   });
 }
