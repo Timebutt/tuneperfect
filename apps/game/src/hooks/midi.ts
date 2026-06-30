@@ -16,8 +16,6 @@ export async function registerMidiInputs() {
     if (!e.port) {
       return;
     }
-
-    console.log(e.port.name, e.port.manufacturer, e.port.state);
   };
 }
 
