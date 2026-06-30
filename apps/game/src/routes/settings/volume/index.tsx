@@ -27,7 +27,14 @@ function VolumeComponent() {
   const [outputDevices, setOutputDevices] = createSignal<MediaDeviceInfo[]>([]);
 
   onMount(async () => {
+    // Call getUserMedia() explicitly to be able to request the audio output devices on macOS
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
     const devices = await navigator.mediaDevices.enumerateDevices();
+
+    // Clean up the stream immediately so your microphone light turns off
+    stream.getTracks().forEach((track) => track.stop());
+
     setOutputDevices(devices.filter((d) => d.kind === "audiooutput" && d.deviceId !== "default"));
   });
 
@@ -37,10 +44,7 @@ function VolumeComponent() {
     onBack();
   };
 
-  const deviceOptions = createMemo(() => [
-    DEFAULT_DEVICE_ID,
-    ...outputDevices().map((d) => d.deviceId),
-  ]);
+  const deviceOptions = createMemo(() => [DEFAULT_DEVICE_ID, ...outputDevices().map((d) => d.deviceId)]);
 
   const deviceName = (id: string | null) => {
     if (!id) return t("settings.sections.volume.outputDeviceDefault");

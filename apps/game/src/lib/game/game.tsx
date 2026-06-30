@@ -43,8 +43,20 @@ export function createGame(options: Accessor<CreateGameOptions>) {
     await setAudioOutputDevice(outputDeviceId);
 
     let outputDeviceName: string | null = null;
+
+    console.log("outputDeviceId", outputDeviceId);
+
     if (outputDeviceId) {
+      // Call getUserMedia() explicitly to be able to request the audio output devices on macOS
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
       const devices = await navigator.mediaDevices.enumerateDevices();
+
+      // Clean up the stream immediately so your microphone light turns off
+      stream.getTracks().forEach((track) => track.stop());
+
+      console.log(devices);
+
       outputDeviceName = devices.find((d) => d.deviceId === outputDeviceId)?.label ?? null;
     }
 
