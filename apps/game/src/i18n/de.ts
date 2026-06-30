@@ -245,6 +245,9 @@ const de = {
         menu: "Menülautstärke",
         micPlayback: "Mikrofon-Wiedergabe",
         micPlaybackVolume: "Mikrofon-Wiedergabelautstärke",
+        outputDevice: "Audio-Ausgabegerät",
+        outputDeviceDefault: "Systemstandard",
+        outputChannel: "Ausgabekanäle",
       },
       usdb: {
         title: "USDB",

@@ -21,6 +21,8 @@ const settingsStoreSchema = v.object({
     preview: v.number(),
     menu: v.number(),
     micPlayback: v.fallback(v.number(), 0.5),
+    outputDeviceId: v.fallback(v.nullable(v.string()), null),
+    outputChannelOffset: v.fallback(v.number(), 0),
   }),
   microphones: v.array(
     v.object({
@@ -60,6 +62,8 @@ const defaultSettings: SettingsStore = {
     preview: 0.5,
     menu: 0.5,
     micPlayback: 1,
+    outputDeviceId: null,
+    outputChannelOffset: 0,
   },
   microphones: [],
   songs: {
@@ -109,7 +113,7 @@ function createSettingsStore() {
     updateSettings("volume", settings);
   };
 
-  const getVolume = (key: keyof VolumeSettings) => {
+  const getVolume = (key: Exclude<keyof VolumeSettings, "outputDeviceId">) => {
     return volume()[key] * volume().master;
   };
 

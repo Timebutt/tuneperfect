@@ -43,6 +43,7 @@ pub fn run() {
     let builder = Builder::<tauri::Wry>::new()
         .commands(collect_commands![
             microphones::get_microphones,
+            microphones::get_output_devices,
             pitch::start_recording,
             pitch::stop_recording,
             pitch::get_pitches,

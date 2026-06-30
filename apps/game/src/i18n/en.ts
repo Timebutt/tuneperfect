@@ -245,6 +245,9 @@ const en = {
         menu: "Menu Volume",
         micPlayback: "Microphone Playback",
         micPlaybackVolume: "Microphone Playback Volume",
+        outputDevice: "Audio Output Device",
+        outputDeviceDefault: "System Default",
+        outputChannel: "Output Channels",
       },
       usdb: {
         title: "USDB",

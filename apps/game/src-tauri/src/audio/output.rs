@@ -94,17 +94,27 @@ impl OutputMixer {
 
     /// Create and start the output stream. Consumes the mixer because the
     /// consumers and resamplers are moved into the realtime callback.
+    ///
+    /// `channel_offset` selects which stereo pair to write to (0 = channels 1-2,
+    /// 2 = channels 3-4, etc.). All other channels are silenced. Clamped to the
+    /// device's channel count so an invalid offset safely falls back to the last
+    /// available pair.
     pub fn create_output_stream(
         self,
         device: Device,
         config: StreamConfig,
         playback_volume: f32,
+        channel_offset: usize,
     ) -> Result<Stream, AppError> {
         let output_channels = config.channels as usize;
         let mut mic_consumers = self.mic_consumers;
         let mut resamplers = self.resamplers;
         let mut dc_blockers = self.dc_blockers;
         let volume = playback_volume.clamp(0.0, 1.0);
+
+        // Clamp offset to a valid stereo pair within the device channel count.
+        let ch0 = channel_offset.min(output_channels.saturating_sub(1));
+        let ch1 = (channel_offset + 1).min(output_channels.saturating_sub(1));
 
         // Pre-allocated scratch buffers reused across callbacks so the realtime
         // audio thread never allocates on the hot path.
@@ -123,12 +133,18 @@ impl OutputMixer {
                 &mut scratch,
             );
 
+            // Zero all channels first, then write the mixed audio to the
+            // selected stereo pair only.
+            data.fill(0.0);
             for (i, &mono_sample) in mixed.iter().enumerate() {
                 let sample = (mono_sample * volume).clamp(-1.0, 1.0);
-                for ch in 0..output_channels {
-                    if i * output_channels + ch < data.len() {
-                        data[i * output_channels + ch] = sample;
-                    }
+                let left = i * output_channels + ch0;
+                let right = i * output_channels + ch1;
+                if left < data.len() {
+                    data[left] = sample;
+                }
+                if right < data.len() {
+                    data[right] = sample;
                 }
             }
         };

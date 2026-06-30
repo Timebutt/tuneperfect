@@ -6,7 +6,8 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 /** Commands */
 export const commands = {
 	getMicrophones: () => typedError<Microphone[], AppError>(__TAURI_INVOKE("get_microphones")),
-	startRecording: (options: MicrophoneOptions[], playbackEnabled: boolean, playbackVolume: number | null) => typedError<null, AppError>(__TAURI_INVOKE("start_recording", { options, playbackEnabled, playbackVolume })),
+	getOutputDevices: () => typedError<OutputDevice[], AppError>(__TAURI_INVOKE("get_output_devices")),
+	startRecording: (options: MicrophoneOptions[], playbackEnabled: boolean, playbackVolume: number | null, outputDeviceName: string | null, outputChannelOffset: number | null) => typedError<null, AppError>(__TAURI_INVOKE("start_recording", { options, playbackEnabled, playbackVolume, outputDeviceName, outputChannelOffset })),
 	stopRecording: () => typedError<null, AppError>(__TAURI_INVOKE("stop_recording")),
 	getPitches: (windowMs: number | null) => typedError<(number | null)[], AppError>(__TAURI_INVOKE("get_pitches", { windowMs })),
 	getAudioLevels: () => typedError<(number | null)[], AppError>(__TAURI_INVOKE("get_audio_levels")),
@@ -137,6 +138,16 @@ export type Note = {
 };
 
 export type NoteType = "Normal" | "Golden" | "Freestyle" | "Rap" | "RapGolden";
+
+export type OutputDevice = {
+	/**
+	 *  Stable device ID (cpal `DeviceId` serialized via `Display`). Used to
+	 *  persist the user's output device selection.
+	 */
+	id: string | null,
+	name: string,
+	channels: number,
+};
 
 export type Phrase = {
 	disappearBeat: number,

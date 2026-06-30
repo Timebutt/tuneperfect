@@ -12,9 +12,10 @@ import Layout from "~/components/layout";
 import type { MenuItem } from "~/components/menu";
 import Menu from "~/components/menu";
 import { t } from "~/lib/i18n";
+import { setAudioOutputDevice } from "~/lib/audio/context";
 import { initializeLobbySettings } from "~/stores/lobby";
 import { initializeLocalSettings } from "~/stores/local";
-import { initializeSettings } from "~/stores/settings";
+import { initializeSettings, settings } from "~/stores/settings";
 import { initializeUsdbStore } from "~/stores/usdb";
 
 export const Route = createFileRoute("/")({
@@ -26,6 +27,9 @@ export const Route = createFileRoute("/")({
       initializeLobbySettings(),
       initializeUsdbStore(),
     ]);
+    // Apply the persisted output device to the Web Audio context so song
+    // previews and game playback are routed to the user's chosen device.
+    void setAudioOutputDevice(settings().volume.outputDeviceId);
   },
 });
 

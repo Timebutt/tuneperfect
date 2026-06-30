@@ -4,6 +4,7 @@ import { type Accessor, batch, createEffect, createSignal, type JSX } from "soli
 import { commands } from "~/bindings";
 import type { SongPlayerRef } from "~/components/song-player";
 import { sendMidiNote } from "~/hooks/midi";
+import { setAudioOutputDevice } from "~/lib/audio/context";
 import { beatToMs, beatToMsWithoutGap, msToBeat } from "~/lib/ultrastar/bpm";
 import type { Song } from "~/lib/ultrastar/song";
 import { roundStore, type Score } from "~/stores/round";
@@ -38,10 +39,33 @@ export function createGame(options: Accessor<CreateGameOptions>) {
       throw new Error("No song provided");
     }
 
+    const { outputDeviceId, outputChannelOffset } = settingsStore.volume();
+    await setAudioOutputDevice(outputDeviceId);
+
+    let outputDeviceName: string | null = null;
+
+    console.log("outputDeviceId", outputDeviceId);
+
+    if (outputDeviceId) {
+      // Call getUserMedia() explicitly to be able to request the audio output devices on macOS
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      const devices = await navigator.mediaDevices.enumerateDevices();
+
+      // Clean up the stream immediately so your microphone light turns off
+      stream.getTracks().forEach((track) => track.stop());
+
+      console.log(devices);
+
+      outputDeviceName = devices.find((d) => d.deviceId === outputDeviceId)?.label ?? null;
+    }
+
     await commands.startRecording(
       roundStore.settings()?.songs[0]?.players.map((p) => p?.microphone) ?? [],
       settingsStore.general().micPlaybackEnabled,
       settingsStore.volume().micPlayback,
+      outputDeviceName,
+      outputChannelOffset,
     );
 
     setStarted(true);
