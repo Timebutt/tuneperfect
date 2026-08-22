@@ -6801,6 +6801,7 @@ dependencies = [
  "log",
  "md5",
  "num_cpus",
+ "objc2-foundation",
  "percent-encoding",
  "regex",
  "reqwest",
