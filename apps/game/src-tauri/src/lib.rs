@@ -38,6 +38,24 @@ impl Default for AppState {
     }
 }
 
+/// Opt out of macOS App Nap so audio processing and rendering keep running at
+/// full speed when the game window is in the background or occluded. Without
+/// this, macOS throttles timers and can drop the webview to a software
+/// rendering fallback once the window loses focus.
+///
+/// `beginActivityWithOptions:reason:` returns an activity token that only stays
+/// in effect while it is alive, so we leak it to keep App Nap disabled for the
+/// entire application lifetime.
+#[cfg(target_os = "macos")]
+fn disable_app_nap() {
+    use objc2_foundation::{NSActivityOptions, NSProcessInfo, NSString};
+
+    let options = NSActivityOptions::UserInitiated | NSActivityOptions::LatencyCritical;
+    let reason = NSString::from_str("Continuous audio processing and rendering");
+    let token = NSProcessInfo::processInfo().beginActivityWithOptions_reason(options, &reason);
+    std::mem::forget(token);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = Builder::<tauri::Wry>::new()
@@ -97,6 +115,9 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
+        // Apparently enabling this on Windows crashes this!
+        // We need this to run the app on macOS!
+        .plugin(tauri_plugin_midi::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -126,6 +147,9 @@ pub fn run() {
             app.manage(AppState::default());
             app.manage(webrtc::host::create_shared_host());
             builder.mount_events(app);
+
+            #[cfg(target_os = "macos")]
+            disable_app_nap();
 
             Ok(())
         })

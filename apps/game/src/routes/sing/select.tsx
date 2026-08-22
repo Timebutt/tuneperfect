@@ -9,6 +9,7 @@ import Menu, { type MenuItem } from "~/components/menu";
 import TitleBar from "~/components/title-bar";
 import Avatar from "~/components/ui/avatar";
 import { createLoop } from "~/hooks/loop";
+import { createMidiNoteListener } from "~/hooks/midi";
 import { useNavigation } from "~/hooks/navigation";
 import { t } from "~/lib/i18n";
 import { popup } from "~/lib/popup";
@@ -25,6 +26,7 @@ import { medleyStore } from "~/stores/medley";
 import { type PlayerSelection, type RoundLength, useRoundActions } from "~/stores/round";
 import { selectionStore } from "~/stores/selection";
 import { type Microphone, settingsStore } from "~/stores/settings";
+import { songsStore } from "~/stores/songs";
 
 export const Route = createFileRoute("/sing/select")({
   component: PlayerSelectionComponent,
@@ -55,6 +57,16 @@ const [medleyLength, setMedleyLength] = createSignal<RoundLength>("short");
 function PlayerSelectionComponent() {
   const playerSlotLoop = createLoop(settingsStore.microphones().length);
   const roundActions = useRoundActions();
+
+  // Start game on MIDI note 30 (C3).
+  createMidiNoteListener(1, 30, () => {
+    startGame();
+  });
+
+  // MIDI Note 9 is the bottom left switch on the Harley Benton MP100 in Fortress Utility page
+  createMidiNoteListener(1, 9, () => {
+    startGame();
+  });
 
   const navigate = useNavigate();
 
@@ -398,7 +410,11 @@ interface SelectPlayerPopupProps {
 }
 
 function SelectPlayerPopup(props: SelectPlayerPopupProps) {
+  const params = Route.useParams();
+
   const [selectedVoice, setSelectedVoice] = createSignal(0);
+
+  const song = () => songsStore.songs().find((song) => song.hash === params().hash);
 
   createEffect(() => {
     setSelectedVoice(props.selection?.voice ?? 0);
@@ -472,6 +488,10 @@ function SelectPlayerPopup(props: SelectPlayerPopupProps) {
       header={<TitleBar title={t("select.selectPlayer")} onBack={handleBack} />}
       footer={<KeyHints hints={["back", "navigate", "confirm"]} />}
     >
+      <Show when={song()}>
+        <h1 class="height-full text-center text-8xl font-bold">{`${song()?.artist} - ${song()?.title}`}</h1>
+      </Show>
+
       <Menu items={playerMenuItems()} onBack={handleBack} gradient="gradient-sing" layer={1} />
     </Layout>
   );

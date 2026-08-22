@@ -1,3 +1,4 @@
+import { createMidiNoteListener } from "~/hooks/midi";
 import { useNavigation } from "~/hooks/navigation";
 import { t } from "~/lib/i18n";
 
@@ -21,6 +22,24 @@ export default function PauseMenu(props: PauseMenuProps) {
         props.onClose?.();
       }
     },
+  });
+
+  createMidiNoteListener(1, 30, () => {
+    props.onRestart?.();
+  });
+
+  createMidiNoteListener(1, 31, () => {
+    props.onExit?.();
+  });
+
+  // MIDI Note 9 is the bottom left switch on the Harley Benton MP100 in Fortress Utility page
+  createMidiNoteListener(1, 9, () => {
+    props.onRestart?.();
+  });
+
+  // MIDI Note 10 is the bottom second switch on the Harley Benton MP100 in Fortress Utility page
+  createMidiNoteListener(1, 10, () => {
+    props.onExit?.();
   });
 
   const menuItems = (): MenuItem[] => [

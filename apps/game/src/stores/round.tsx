@@ -1,9 +1,11 @@
 import { type LinkProps, useNavigate } from "@tanstack/solid-router";
 import { createSignal } from "solid-js";
 
+import { sendWebsocketMessage } from "~/hooks/websocket";
 import type { User } from "~/lib/types";
 import { getMedleySong } from "~/lib/ultrastar/medley";
 import { type Song, isLocalSong } from "~/lib/ultrastar/song";
+import { getMaxScore, getRelativeScore } from "~/lib/utils/score";
 
 import type { Microphone } from "./settings";
 
@@ -85,7 +87,12 @@ export function useRoundActions() {
     navigate({ to: "/game" });
   };
 
-  const endRound = (scores: Score[]) => {
+  const endRound = (scores: Score[], submitScores: boolean) => {
+    if (!submitScores) {
+      navigate({ to: "/sing" });
+      return;
+    }
+
     const song = roundStore.settings()?.songs[0];
     if (!song) return;
 
@@ -95,9 +102,33 @@ export function useRoundActions() {
 
     if (nextSong) {
       navigate({ to: "/game/next" });
-
       return;
     }
+
+    console.log(
+      scores.map((absoluteScore, index) => {
+        const voice = song.song.voices[index] ?? song.song.voices[0];
+        if (!voice) return 0;
+
+        const maxScore = getMaxScore(voice);
+        const relativeScore = getRelativeScore(absoluteScore, maxScore);
+        return Math.floor(relativeScore.normal + relativeScore.golden + relativeScore.bonus);
+      }),
+    );
+
+    sendWebsocketMessage(
+      JSON.stringify({
+        type: "scores",
+        value: scores.map((absoluteScore, index) => {
+          const voice = song.song.voices[index] ?? song.song.voices[0];
+          if (!voice) return 0;
+
+          const maxScore = getMaxScore(voice);
+          const relativeScore = getRelativeScore(absoluteScore, maxScore);
+          return Math.floor(relativeScore.normal + relativeScore.golden + relativeScore.bonus);
+        }),
+      }),
+    );
 
     navigate({ to: "/game/score" });
   };

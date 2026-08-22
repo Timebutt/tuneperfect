@@ -58,7 +58,7 @@ export default function Lyrics(props: LyricsProps) {
       }}
     >
       <div class="grid grid-cols-[1fr_max-content_1fr]">
-        <div class="pt-3 pr-1 pb-2">
+        <div class="flex items-center pt-3 pr-1 pb-2">
           <Show when={leadInPercentage()}>
             {(percentage) => (
               <div
@@ -67,7 +67,7 @@ export default function Lyrics(props: LyricsProps) {
                     percentage().end
                   }%, transparent ${percentage().start}%`,
                 }}
-                class="h-full w-full"
+                class="h-[50%] w-full"
               />
             )}
           </Show>
@@ -90,7 +90,7 @@ export default function Lyrics(props: LyricsProps) {
         </div>
         <div />
       </div>
-      <div class="text-center text-white/50" classList={{ "text-3xl": !isCompact(), "text-2xl": isCompact() }}>
+      <div class="text-center text-white/50" classList={{ "text-[40px]": !isCompact(), "text-2xl": isCompact() }}>
         <For fallback={<span class="text-transparent">{"\u00A0"}</span>} each={voiceTracker.nextPhrase()?.notes}>
           {(note) => (
             <span
@@ -99,7 +99,7 @@ export default function Lyrics(props: LyricsProps) {
                 italic: note.type === "Freestyle",
               }}
             >
-              {note.text}
+              {note.text.replaceAll("~", "")}
             </span>
           )}
         </For>
@@ -125,19 +125,20 @@ function LyricsNote(props: LyricsNoteProps) {
     return clamp(((beat - props.note.startBeat) * 100) / props.note.length, 0, 100);
   });
 
+  // Lyrics font size are here!
   return (
     <span
       style={{
         "background-image": `linear-gradient(to right, ${props.color} ${percentage()}%, white ${percentage()}%)`,
       }}
-      class="inline-block bg-clip-text leading-relaxed whitespace-pre text-transparent"
+      class="inline-block bg-clip-text text-[62px] leading-relaxed whitespace-pre text-transparent"
       classList={{
         "m-[-0.15cqw] p-[0.15cqw] italic": props.note.type === "Freestyle",
         "text-4xl": !props.compact,
         "text-3xl": props.compact,
       }}
     >
-      {props.note.text}
+      {props.note.text.replaceAll("~", "")}
     </span>
   );
 }

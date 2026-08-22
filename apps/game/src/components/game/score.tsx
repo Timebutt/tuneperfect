@@ -26,7 +26,7 @@ export default function Score(props: ScoreProps) {
 
     if (maxScoreTotal === 0) return 0;
 
-    return Math.round((currentScoreTotal / maxScoreTotal) * 100000);
+    return Math.round((currentScoreTotal / maxScoreTotal) * 10000);
   });
 
   const [displayScore, setDisplayScore] = createSignal(0);

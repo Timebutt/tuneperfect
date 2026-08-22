@@ -119,6 +119,7 @@ pub fn parse_ultrastar_txt(content: &str) -> Result<Song, AppError> {
         medley_start: None,
         medley_end: None,
         voices: Vec::new(),
+        midi_note: None,
     };
 
     let mut notes: Vec<Note> = Vec::new();
@@ -234,7 +235,8 @@ pub fn parse_ultrastar_txt(content: &str) -> Result<Song, AppError> {
                         } else {
                             Some(parse_time_value(value, &property, uses_milliseconds)?)
                         }
-                    }
+                    },
+                    "midinote" => song.midi_note = Some(parse_us_int(value, &property)?),
                     _ => (),
                 }
             }

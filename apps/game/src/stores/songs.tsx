@@ -26,6 +26,8 @@ function createSongsStore() {
 
       const result = await commands.parseSongsFromPaths(pathsToUpdate);
 
+      console.log(result);
+
       if (result.status === "error") {
         console.error("Failed to update local songs:", result.error);
         return;

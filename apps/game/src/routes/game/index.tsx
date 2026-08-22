@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/solid-router";
-import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, untrack } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack } from "solid-js";
 
 import GameLayout from "~/components/game/game-layout";
 import Lyrics from "~/components/game/lyrics";
@@ -9,6 +9,7 @@ import Progress from "~/components/game/progress";
 import OnlineSongPlayer from "~/components/online-song-player";
 import type { SongPlayerRef } from "~/components/song-player";
 import SongPlayer from "~/components/song-player";
+import { createMidiNoteListener, sendMidiNote } from "~/hooks/midi";
 import { useNavigation } from "~/hooks/navigation";
 import { createGame } from "~/lib/game/game";
 import { notify } from "~/lib/toast";
@@ -23,8 +24,8 @@ export const Route = createFileRoute("/game/")({
 function GameComponent() {
   const navigate = useNavigate();
   const [songPlayerRef, setSongPlayerRef] = createSignal<SongPlayerRef>();
-  const [ready, setReady] = createSignal(false);
   const [canPlayThrough, setCanPlayThrough] = createSignal(false);
+  const [hideIntro, setHideIntro] = createSignal(false);
   const roundActions = useRoundActions();
 
   const roundSong = () => roundStore.settings()?.songs[0];
@@ -70,6 +71,20 @@ function GameComponent() {
 
   const paused = () => !playing() && started();
 
+  createMidiNoteListener(1, 31, () => {
+    pause();
+  });
+
+  // MIDI Note 10 is the bottom second switch on the Harley Benton MP100 in Fortress Utility page
+  createMidiNoteListener(1, 10, () => {
+    pause();
+  });
+
+  // Delayed by a little bit to ensure there's no glitch in OBS
+  setTimeout(() => {
+    sendMidiNote(1, 2);
+  }, 300);
+
   useNavigation(() => ({
     layer: 0,
     onKeydown: (event) => {
@@ -88,30 +103,33 @@ function GameComponent() {
   }));
 
   createEffect(() => {
-    if (ready() && canPlayThrough() && !untrack(started)) {
+    // TO-DO: check new condition !untracked(started) here
+    if (canPlayThrough() && !untrack(started)) {
       untrack(() => start());
     }
   });
 
-  onMount(() => {
-    const startTimeout = roundSong()?.length === "full" ? 3000 : 1000;
-    setTimeout(() => {
-      setReady(true);
-    }, startTimeout);
+  createEffect(() => {
+    if (started()) {
+      setTimeout(() => {
+        setHideIntro(true);
+      }, 3000);
+    }
   });
 
   onCleanup(async () => {
     await stop();
   });
 
-  const handleEnded = () => {
+  const handleEnded = (submitScores: boolean) => {
     queueMicrotask(() => {
-      roundActions.endRound(scores());
+      roundActions.endRound(scores(), submitScores ?? true);
     });
   };
 
   const handleNext = () => {
     queueMicrotask(() => {
+      // TO-DO: fix
       roundActions.endRound(scores());
     });
   };
@@ -121,6 +139,7 @@ function GameComponent() {
       if (roundSong()?.mode === "medley") {
         roundActions.endMedley(scores());
       } else {
+        // TO-DO: fix
         roundActions.endRound(scores());
       }
     });
@@ -262,7 +281,7 @@ function GameComponent() {
                 <PauseMenu
                   class="absolute inset-0"
                   onClose={resume}
-                  onExit={handleExit}
+                  onExit={() => handleEnded(false)}
                   onNext={handleNext}
                   showNext={roundSong()?.mode === "medley" && (roundStore.settings()?.songs.length ?? 0) > 1}
                   onRestart={handleRestart}
@@ -273,7 +292,7 @@ function GameComponent() {
               <div
                 class="absolute inset-0 z-2 bg-black transition-opacity duration-1000"
                 classList={{
-                  "pointer-events-none opacity-0": started(),
+                  "pointer-events-none opacity-0": hideIntro(),
                 }}
               >
                 <img
@@ -288,13 +307,9 @@ function GameComponent() {
                   alt=""
                 />
                 <div class="relative flex h-full w-full flex-col items-center justify-center gap-2">
-                  <p class="text-3xl">{roundSong()?.song.artist}</p>
-                  <div class="max-w-200">
-                    <span
-                      class={`${gradient()} bg-linear-to-b bg-clip-text text-center text-7xl font-bold text-transparent`}
-                    >
-                      {roundSong()?.song.title}
-                    </span>
+                  <p class="text-6xl">{roundSong()?.song.artist}</p>
+                  <div class="px-8 text-center">
+                    <span class="text-center text-8xl font-bold">{roundSong()?.song.title}</span>
                   </div>
                 </div>
               </div>

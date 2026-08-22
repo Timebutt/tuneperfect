@@ -1,14 +1,18 @@
 import { createEventListener } from "@solid-primitives/event-listener";
 import { debounce } from "@solid-primitives/scheduled";
 import type { QueryClient } from "@tanstack/solid-query";
-import { createRootRouteWithContext, Outlet, redirect } from "@tanstack/solid-router";
+import { createRootRouteWithContext, Outlet, redirect, useNavigate } from "@tanstack/solid-router";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { createSignal, Suspense } from "solid-js";
 
 import PopupContainer from "~/components/popup-container";
 import { RouteError } from "~/components/route-error";
+import { createMidiNoteListener, registerMidiInputs } from "~/hooks/midi";
 import { useNavigation } from "~/hooks/navigation";
 import { useWakeLock } from "~/hooks/use-wake-lock";
+import { initWebSocket } from "~/hooks/websocket";
+import { selectionStore } from "~/stores/selection";
+import { songsStore } from "~/stores/songs";
 import { useWebRTCAutoConnect } from "~/stores/webrtc";
 
 interface RouterContext {
@@ -47,6 +51,30 @@ function RootComponent() {
       }
     },
   });
+
+  const navigate = useNavigate();
+
+  // Register the song navigation (listening to MIDI channel 5)
+  registerMidiInputs().then(() => {
+    createMidiNoteListener(5, undefined, (event) => {
+      if (event.data) {
+        const songMidiNote = event.data[1];
+        if (typeof songMidiNote !== "number") {
+          return;
+        }
+
+        const matchingSong = songsStore.songs().find((song) => song.midiNote === songMidiNote);
+        if (matchingSong) {
+          selectionStore.set([matchingSong], "single");
+          navigate({ to: `/sing/select` });
+        } else {
+          navigate({ to: "/sing" });
+        }
+      }
+    });
+  });
+
+  initWebSocket();
 
   const [mouseHidden, setMouseHidden] = createSignal(false);
 

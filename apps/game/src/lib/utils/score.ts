@@ -3,7 +3,7 @@ import type { Score } from "~/stores/round";
 import type { Note } from "../ultrastar/note";
 import type { Voice } from "../ultrastar/voice";
 
-export const MAX_POSSIBLE_SCORE = 100000;
+export const MAX_POSSIBLE_SCORE = 10000;
 
 export type PhraseRating = "perfect" | "great" | "good" | "meh" | "boo";
 
